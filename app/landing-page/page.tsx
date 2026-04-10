@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Map } from "@/components/ui/map";
 import React from 'react'
 
 const LandingPage = () => {
