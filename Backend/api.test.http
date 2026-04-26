@@ -1,3 +1,0 @@
-### LIST ALL USERS
-
-GET http://localhost:3000/plots HTTP/1.1
