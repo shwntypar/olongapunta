@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -12,30 +7,164 @@ datasource db {
   provider = "postgresql"
 }
 
+enum NodeType {
+  INTERSECTION
+  JEEPNEY_STOP
+  TODA_TERMINAL
+  LANDMARK
+}
 
-model User{
-  id        Int   @id @default(autoincrement()) @map("id")
+enum TransportMode {
+  JEEPNEY
+  TODA
+  WALK
+}
+
+enum JeepneyColor {
+  YELLOW
+  BLUE
+  RED
+  GREEN
+}
+
+// ─── Users ────────────────────────────────────────────────
+
+model User {
+  id        Int      @id @default(autoincrement()) @map("id")
   email     String   @unique @map("email")
-  firstName   String @map("first_name")
-  lastName    String @map("last_name")
-  userName      String @unique @map("user_name")
-  password  String @map("password")
-
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  userName  String   @unique @map("user_name")
+  password  String   @map("password")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("users")
 }
 
-model PlotPoints {
-  id String @id @default(uuid()) @map("id")
-  location Json @map("location")
+// ─── Graph: Nodes ─────────────────────────────────────────
 
-  name String @map("name")
-  description String @map("description")
+model Node {
+  id            String   @id @default(uuid()) @map("id")
+  name          String   @map("name")
+  description   String?  @map("description")
+  type          NodeType @map("type")
+  lat           Decimal  @db.Decimal(10, 8) @map("lat")
+  lng           Decimal  @db.Decimal(11, 8) @map("lng")
+  landmarkAlias String?  @map("landmark_alias")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Option B: each direction is its own edge row
+  edgesFrom  Edge[]      @relation("EdgeFrom")
+  edgesTo    Edge[]      @relation("EdgeTo")
+
+  routeStops RouteStop[]
+  todaZone   TodaZone?   @relation("TerminalNode")
+  landmarks  Landmark[]
+
+  @@map("nodes")
+}
+
+// ─── Jeepney Routes ───────────────────────────────────────
+
+model JeepneyRoute {
+  id        String       @id @default(uuid()) @map("id")
+  colorCode JeepneyColor @map("color_code")
+  routeName String       @map("route_name")
+  baseFare  Decimal      @db.Decimal(5, 2) @map("base_fare")
+  farePerKm Decimal      @db.Decimal(5, 2) @map("fare_per_km")
+  isActive  Boolean      @default(true) @map("is_active")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  stops RouteStop[]
+  edges Edge[]
+
+  @@map("jeepney_routes")
+}
+
+model RouteStop {
+  id        String       @id @default(uuid()) @map("id")
+  routeId   String       @map("route_id")
+  nodeId    String       @map("node_id")
+  stopOrder Int          @map("stop_order")
+
+  route JeepneyRoute @relation(fields: [routeId], references: [id])
+  node  Node         @relation(fields: [nodeId], references: [id])
+
+  @@unique([routeId, stopOrder])
+  @@map("route_stops")
+}
+
+// ─── TODA Zones ───────────────────────────────────────────
+
+model TodaZone {
+  id             String   @id @default(uuid()) @map("id")
+  zoneName       String   @map("zone_name")
+  terminalNodeId String   @unique @map("terminal_node_id")
+  baseFare       Decimal  @db.Decimal(5, 2) @map("base_fare")
+  farePerKm      Decimal  @db.Decimal(5, 2) @map("fare_per_km")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  terminalNode Node   @relation("TerminalNode", fields: [terminalNodeId], references: [id])
+  edges        Edge[]
+
+  @@map("toda_zones")
+}
+
+// ─── Edges ───────────────────────────────────────────
+
+model Edge {
+  id            String        @id @default(uuid()) @map("id")
+  fromNodeId    String        @map("from_node_id")
+  toNodeId      String        @map("to_node_id")
+  transportMode TransportMode @map("transport_mode")
+  distanceM     Decimal       @db.Decimal(10, 2) @map("distance_m")
+  travelTimeMin Decimal       @db.Decimal(5, 2) @map("travel_time_min")
+  estimatedFare Decimal       @db.Decimal(6, 2) @map("estimated_fare")
+
+  // transfer_penalty is only set on WALK edges between modes
+  // e.g. 5.0 means "treat this transfer as 5 extra minutes"
+  transferPenalty Decimal @db.Decimal(4, 2) @default(0) @map("transfer_penalty")
+
+  jeepneyRouteId String? @map("jeepney_route_id")
+  todaZoneId     String? @map("toda_zone_id")
+
+  fromNode     Node          @relation("EdgeFrom", fields: [fromNodeId], references: [id])
+  toNode       Node          @relation("EdgeTo", fields: [toNodeId], references: [id])
+  jeepneyRoute JeepneyRoute? @relation(fields: [jeepneyRouteId], references: [id])
+  todaZone     TodaZone?     @relation(fields: [todaZoneId], references: [id])
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@map("plot_points")
+  @@map("edges")
+}
+
+// ─── Fare Matrix ──────────────────────────────────────────
+
+model FareMatrix {
+  id            String        @id @default(uuid()) @map("id")
+  transportMode TransportMode @map("transport_mode")
+  minKm         Decimal       @db.Decimal(5, 2) @map("min_km")
+  maxKm         Decimal       @db.Decimal(5, 2) @map("max_km")
+  fareAmount    Decimal       @db.Decimal(6, 2) @map("fare_amount")
+
+  @@map("fare_matrix")
+}
+
+// ─── Landmarks ────────────────────────────────────────────
+
+model Landmark {
+  id              String  @id @default(uuid()) @map("id")
+  name            String  @map("name")
+  category        String  @map("category") 
+  nodeId          String  @map("node_id")
+  geofenceRadiusM Int     @default(50) @map("geofence_radius_m")
+
+  node Node @relation(fields: [nodeId], references: [id])
+
+  @@map("landmarks")
 }
