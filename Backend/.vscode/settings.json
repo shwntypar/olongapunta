@@ -1,7 +1,0 @@
-{
-    "chat.tools.terminal.autoApprove": {
-        "bun": true,
-        "ipconfig": true,
-        "Set-Content": true
-    }
-}
