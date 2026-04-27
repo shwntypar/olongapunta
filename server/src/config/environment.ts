@@ -33,8 +33,24 @@ export const config = {
     connectionTimeout: Number(process.env.DB_CONNECTION_TIMEOUT) || 60000,
   },
 
+  security: {
+    rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
+    rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000,
+    corsOrigins: process.env.CORS_ORIGINS?.split(",") || [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:8080",
+    ],
+  },
+
   // Logging configuration
   logging: {
     level: process.env.LOG_LEVEL || "info",
+  },
+
+  superAdmin: {
+    username: process.env.SUPERADMIN_USERNAME || "superadmin",
+    email: process.env.SUPERADMIN_EMAIL || "superadmin@olongapunta.com",
+    password: process.env.SUPERADMIN_PASSWORD || "SuperSecurePassword123!",
   },
 };
