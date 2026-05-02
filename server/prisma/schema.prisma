@@ -10,6 +10,7 @@ datasource db {
 enum NodeType {
   INTERSECTION
   JEEPNEY_STOP
+  BUS_TERMINAL
   TODA_TERMINAL
   LANDMARK
 }
@@ -27,6 +28,14 @@ enum JeepneyColor {
   GREEN
 }
 
+enum Role{
+  USER
+  ADMIN
+  SUPERADMIN
+
+  @@map("user_role_enum")
+}
+
 // ─── Users ────────────────────────────────────────────────
 
 model User {
@@ -36,6 +45,7 @@ model User {
   lastName  String   @map("last_name")
   userName  String   @unique @map("user_name")
   password  String   @map("password")
+  role     Role      @map("role")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

@@ -4,31 +4,81 @@ import http from "http";
 import { logger } from "./core/utils/logger";
 import { enhancedLogger } from "./core/utils/enhanced-logger";
 import { AppError } from "./core/utils/error";
-import { errorHandler } from "./core/middleware/error-handler.middleware";
-import { initializeLogRotation } from "./core/middleware/api-logger.middleware";
+import {
+  errorHandler,
+  requestLogger,
+} from "./core/middleware/error-handler.middleware";
+import {
+  apiLoggerMiddleware,
+  enhancedErrorLogger,
+  initializeLogRotation,
+} from "./core/middleware/api-logger.middleware";
 import { AppRoutes } from "./routes";
 import type { PrismaClient } from "../generated/prisma/client";
 import { prisma } from "./core/prisma";
+import { AuthContainer } from "./modules/auth/container";
+import { corsOptions, customCors } from "./core/middleware/cors.middlware";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import { config } from "./config/environment";
+import { NodeContainer } from "./modules/node/container";
 
 export class App {
   public app: Application;
   public server: http.Server;
   private prisma: PrismaClient;
-  private appRoutes: AppRoutes;
+  private appRoutes!: AppRoutes;
+
+  // modules
+  private authContainer: AuthContainer;
+  private nodeContainer: NodeContainer;
 
   constructor() {
     this.app = express();
     this.server = http.createServer(this.app);
-
     this.prisma = prisma;
-    this.initializeMiddleware();
+
+    // modules
+    this.authContainer = new AuthContainer(this.prisma);
+    this.nodeContainer = new NodeContainer(this.prisma);
+
+    this.configureMiddle();
     this.setupRoutes();
+    this.configureErrorHandling();
+    this.setupShutdownHandlers();
   }
 
-  private initializeMiddleware() {}
+  private configureMiddle() {
+    this.app.use(requestLogger);
+
+    this.app.use(apiLoggerMiddleware);
+
+    this.app.use(customCors);
+    this.app.options(/(.*)/, cors(corsOptions));
+
+    this.app.use(cookieParser());
+    this.app.use(express.json({ limit: "10mb" }));
+    this.app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+    this.app.set("trust proxy", 1);
+  }
 
   private setupRoutes(): void {
-    this.appRoutes = new AppRoutes(this.prisma);
+    this.appRoutes = new AppRoutes(
+      this.prisma,
+      this.authContainer,
+      this.nodeContainer,
+    );
+
+    this.app.use("/api", this.appRoutes.getRouter());
+
+    this.app.get("/health/quick", (_req: Request, res: Response) => {
+      res.json({
+        status: "OK",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+      });
+    });
   }
 
   private configureErrorHandling(): void {
@@ -36,8 +86,7 @@ export class App {
       next(new AppError("Not Found", 404));
     });
 
-    // Enhanced error logging before standard error handler
-    // this.app.use(enhancedErrorLogger);
+    this.app.use(enhancedErrorLogger);
     this.app.use(errorHandler);
   }
 
@@ -64,7 +113,7 @@ export class App {
       enhancedLogger.info("Application initialized with enhanced logging");
 
       console.log("Seeding superadmin...");
-      // await this.seedSuperAdmin();
+      await this.seedSuperAdmin();
       console.log("Superadmin seeding complete");
     } catch (error) {
       console.error("INITIALIZATION ERROR:", error);
@@ -73,6 +122,48 @@ export class App {
         error: error instanceof Error ? error.message : String(error),
       });
       await this.stop();
+      throw error;
+    }
+  }
+
+  private async seedSuperAdmin(): Promise<void> {
+    try {
+      const existingSuperAdmin = await this.prisma.user.findFirst({
+        where: { role: "SUPERADMIN" },
+      });
+
+      if (existingSuperAdmin) {
+        logger.info(
+          `SUPERADMIN already exists with ID: ${existingSuperAdmin.id}`,
+        );
+        return;
+      }
+
+      const bcryptjs = await import("bcryptjs");
+      const adminPassword =
+        config.superAdmin?.password || "SuperSecurePassword123!";
+      const adminEmail =
+        config.superAdmin?.email || "superadmin@olongapunta.com";
+      const adminUsername = config.superAdmin?.username || "superadmin";
+
+      const hashedPassword = await bcryptjs.hash(adminPassword, 10);
+
+      logger.info("Creating SUPERADMIN user...");
+      const superAdmin = await this.prisma.user.create({
+        data: {
+          userName: adminUsername,
+          firstName: "Super",
+          lastName: "Admin",
+          email: adminEmail,
+          role: "SUPERADMIN",
+          password: hashedPassword,
+          createdAt: new Date(),
+        },
+      });
+
+      logger.info(`Created SUPERADMIN with ID: ${superAdmin.id}`);
+    } catch (error) {
+      logger.error("Error during superadmin seeding:", error);
       throw error;
     }
   }
