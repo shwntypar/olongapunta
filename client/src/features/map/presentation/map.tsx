@@ -4,7 +4,10 @@ import { useState, useEffect, useRef, forwardRef } from "react";
 import { Map } from "@/components/ui/map";
 import { MapMarker, MarkerContent, MarkerTooltip, MapRoute } from "@/components/ui/map";
 import { mockRoutes } from "../domain/MockData";
+import { mockEstablishments } from "../domain/Establishment";
+import { loadingAreas, unloadingAreas } from "../domain/loadingArea";
 import MapLibreGL from "maplibre-gl";
+import { Car, CarFront, Motorbike } from "lucide-react";
 
 export function RoutesOverlay() {
   const colorMap = {
@@ -12,6 +15,18 @@ export function RoutesOverlay() {
     BLUE: '#0000ff',
     RED: '#ff0000',
     GREEN: '#00ff00',
+  };
+
+  const establishmentColors = {
+    Government: 'bg-gray-500',
+    Commercial: 'bg-blue-500',
+    Educational: 'bg-green-500',
+  };
+
+  const vehicleColor = {
+    "YELLOW": 'bg-yellow-500',
+    "BLUE": 'bg-blue-500',
+    "RED": 'bg-red-500',
   };
 
   return (
@@ -40,7 +55,7 @@ export function RoutesOverlay() {
           </>
         ))}
 
-      {/* Markers (if you want them) */}
+      {/* Markers for route stops */}
       {mockRoutes.map((route) =>
         route.stops.map((stop) => (
           <MapMarker
@@ -49,7 +64,7 @@ export function RoutesOverlay() {
             latitude={stop.lat}
           >
             <MarkerContent>
-              <div className="flex size-4.5 items-center justify-center rounded-full border-2 border-white bg-blue-500 text-xs font-semibold text-white shadow-lg">
+              <div className="flex size-6 items-center justify-center rounded-full border-2 border-white bg-blue-500 text-xs font-semibold text-white shadow-lg">
                 {stop.order}
               </div>
             </MarkerContent>
@@ -57,6 +72,62 @@ export function RoutesOverlay() {
           </MapMarker>
         ))
       )}
+
+      {/* Markers for Loading Areas*/}
+      {loadingAreas.map((area) => (
+        <MapMarker
+          key={area.name}
+          longitude={area.lng}
+          latitude={area.lat}
+        >
+          <MarkerContent>
+            <div className={`flex size-6 items-center justify-center rounded-full border-2 border-white ${vehicleColor[area.colorCode] || 'bg-gray-500'} text-xs font-semibold text-white shadow-lg`}>
+              <Motorbike className="text-white size-4" /> {/* E.g., 'B' for Blue Tricycle Loading Area */}
+            </div>
+          </MarkerContent>
+          <MarkerTooltip>
+            <div className="font-bold">{area.name}</div>
+            <div>Base Fare: ₱{area.baseFare.toFixed(2)}</div>
+            {area.maximumFare !== undefined && (
+              <div>Maximum Fare: ₱{area.maximumFare.toFixed(2)}</div>
+            )}
+          </MarkerTooltip>
+        </MapMarker>
+      ))}
+
+        {/* Markers for Unloading Areas */}
+        {unloadingAreas.map((area) => (
+        <MapMarker
+          key={area.name}
+          longitude={area.lng}
+          latitude={area.lat}
+        >
+          <MarkerContent>
+            <div className={`flex size-6 items-center justify-center rounded-full border-2 border-white ${vehicleColor[area.colorCode] || 'bg-gray-500'} text-xs font-semibold text-white shadow-lg`}>
+              <CarFront className="text-white size-4" /> {/* E.g., 'B' for Blue Tricycle Loading Area */}
+            </div>
+          </MarkerContent>
+          <MarkerTooltip>
+            <div className="font-bold">{area.name}</div>
+          </MarkerTooltip>
+        </MapMarker>
+      ))}
+
+      {/* Markers for establishments */}
+      {mockEstablishments.map((establishment) => (
+        <MapMarker
+          key={establishment.name}
+          longitude={establishment.lng}
+          latitude={establishment.lat}
+        >
+          <MarkerContent>
+            <div className={`flex size-6 items-center justify-center rounded-full border-2 border-white ${establishmentColors[establishment.establishmentType] || 'bg-gray-500'} text-xs font-semibold text-white shadow-lg`}>
+              {establishment.establishmentType.charAt(0).toUpperCase()} {/* E.g., 'G' for Government */}
+            </div>
+          </MarkerContent>
+          <MarkerTooltip>{establishment.name} ({establishment.establishmentType})</MarkerTooltip>
+        </MapMarker>
+      ))}
     </>
   );
 }

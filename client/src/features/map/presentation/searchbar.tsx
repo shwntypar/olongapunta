@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { loadingAreas } from "../domain/loadingArea"
 
 export function SearchBar() {
   return (
