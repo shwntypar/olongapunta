@@ -3,6 +3,7 @@ import type { PrismaClient } from "../generated/prisma/client";
 import type { AuthContainer } from "./modules/auth/container";
 import { NodeContainer } from "./modules/node/container";
 import { jwtOnly } from "./core/middleware/auth.middleware";
+import { getAmenities } from "./data/amenities.controller";
 
 export class AppRoutes {
   private router: Router;
@@ -27,6 +28,7 @@ export class AppRoutes {
     });
 
     this.router.use("/auth", this.authContainer.routes.getRouter());
+    this.router.get("/amenities", getAmenities);
     this.router.use("/nodes", jwtOnly, this.nodeContainer.routes.getRouter());
   }
 

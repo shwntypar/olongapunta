@@ -37,6 +37,7 @@ export const config = {
     rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
     rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000,
     corsOrigins: process.env.CORS_ORIGINS?.split(",") || [
+      "http://localhost:3000",
       "http://localhost:5173",
       "http://localhost:5174",
       "http://localhost:8080",
