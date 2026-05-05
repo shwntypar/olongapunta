@@ -22,6 +22,14 @@ export function jeepneyRouteToLineFeature(route: JeepneyRoute): Feature<LineStri
   };
 }
 
+// export function JeepneyRoutes(routes: JeepneyRoute[]): FeatureCollection {
+//   const routes = mockRoutes;
+//   return {
+//     type: "FeatureCollection",
+//     features: routes.map(jeepneyRouteToLineFeature),
+//   };
+// }
+
 export function allMockRoutesFeatureCollection(): FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -63,7 +71,7 @@ export async function fetchJeepneyPathFromMapbox(
       return null;
     }
 
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${waypoints}?alternatives=false&overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
+    const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${waypoints}?alternatives=false&overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
     console.log(`🚀 [JEEPNEY ROUTE] Hitting Mapbox URL:`, url.replace(MAPBOX_TOKEN, "HIDDEN_TOKEN"));
 
     const response = await fetch(url);
@@ -130,7 +138,7 @@ export async function fetchDrivingAlternatives(
     }
 
     const coordinates = `${startLng},${startLat};${endLng},${endLat}`;
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?alternatives=true&overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
+    const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${coordinates}?alternatives=true&overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
     
     console.log(`🚀 [A-TO-B ROUTE] Hitting Mapbox URL:`, url.replace(MAPBOX_TOKEN, "HIDDEN_TOKEN"));
     
