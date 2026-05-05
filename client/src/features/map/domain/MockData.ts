@@ -1,5 +1,17 @@
 export type JeepneyColor = 'YELLOW' | 'BLUE' | 'RED' | 'GREEN';
 
+/** Hex colors for Mapbox line layers (jeepney coding). */
+export const JEEPNEY_COLOR_HEX: Record<JeepneyColor, string> = {
+  YELLOW: '#ca8a04',
+  BLUE: '#2563eb',
+  RED: '#dc2626',
+  GREEN: '#16a34a',
+};
+
+export function jeepneyColorToHex(color: JeepneyColor): string {
+  return JEEPNEY_COLOR_HEX[color];
+}
+
 export interface RouteStop {
   name: string;
   lat: number;
@@ -42,34 +54,24 @@ export const mockRoutes: JeepneyRoute[] = [
       { name: 'Kalaklan Ridge', lat: 14.8450, lng: 120.2750, order: 2 },
       { name: 'Subic Bay Freeport', lat: 14.8300, lng: 120.2800, order: 3 },
       { name: 'Naval Base', lat: 14.8250, lng: 120.2850, order: 4 },
+    ],path: [
+      [120.2834822, 14.8396369],
+      [120.237303, 14.8884801]
     ],
   },
-  {
-    id: 'route-3',
-    colorCode: 'RED',
-    routeName: 'Gordon Heights to Mabayuan to SM Downtown',
-    baseFare: 14.00,
-    farePerKm: 1.25,
-    stops: [
-      { name: 'Blk. 1', lat: 14.8600496, lng: 120.292240, order: 1 },
-      { name: 'Filtration', lat: 14.851620, lng: 120.288707, order: 2 },
-      { name: 'Mabayuan Arch', lat: 14.839914, lng: 120.280935, order: 3 },
-      { name: 'Brill St.', lat: 14.839175, lng: 120.282855, order: 4 },
-    ],
-  },
-  {
-    id: 'route-4',
-    colorCode: 'GREEN',
-    routeName: 'West Bajac to East Tapinac',
-    baseFare: 9.00,
-    farePerKm: 1.60,
-    stops: [
-      { name: 'West Bajac Elementary', lat: 14.8250, lng: 120.2750, order: 1 },
-      { name: 'Bajac Road', lat: 14.8280, lng: 120.2780, order: 2 },
-      { name: 'East Tapinac', lat: 14.8300, lng: 120.2820, order: 3 },
-      { name: 'Tapinac Market', lat: 14.8320, lng: 120.2850, order: 4 },
-    ],
-  },
+  // {
+  //   id: 'route-4',
+  //   colorCode: 'GREEN',
+  //   routeName: 'West Bajac to East Tapinac',
+  //   baseFare: 9.00,
+  //   farePerKm: 1.60,
+  //   stops: [
+  //     { name: 'West Bajac Elementary', lat: 14.8250, lng: 120.2750, order: 1 },
+  //     { name: 'Bajac Road', lat: 14.8280, lng: 120.2780, order: 2 },
+  //     { name: 'East Tapinac', lat: 14.8300, lng: 120.2820, order: 3 },
+  //     { name: 'Tapinac Market', lat: 14.8320, lng: 120.2850, order: 4 },
+  //   ],
+  // },
   {
     id: 'route-5',
     colorCode: 'RED',
