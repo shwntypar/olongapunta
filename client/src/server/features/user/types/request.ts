@@ -1,4 +1,4 @@
-import { Role } from "./response";
+import type { Role } from "./response";
 
 export interface UserCreateInput {
   userName: string;
@@ -20,7 +20,7 @@ export interface UserCreateResponse {
   firstName: string | null;
   lastName: string | null;
   email: string;
-  role: $Enums.Role;
+  role: Role;
   password: string;
   phone: string | null;
   profilePicture: string | null;

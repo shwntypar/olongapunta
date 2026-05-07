@@ -71,13 +71,10 @@ const streams = [
   },
 ];
 
-// Add console output with pretty formatting for both environments
+// Add console output stream
 streams.push({
   level: pinoLevel,
-  stream: pino.transport({
-    target: "pino-pretty",
-    options: prettyConfig,
-  }),
+  stream: pino.destination(1),
 });
 
 const baseLogger = pino(

@@ -4,6 +4,7 @@ import type { AuthContainer } from "./modules/auth/container";
 import { NodeContainer } from "./modules/node/container";
 import { jwtOnly } from "./core/middleware/auth.middleware";
 import { getAmenities } from "./data/amenities.controller";
+import { getRoute } from "./data/navigation.controller";
 
 export class AppRoutes {
   private router: Router;
@@ -29,6 +30,7 @@ export class AppRoutes {
 
     this.router.use("/auth", this.authContainer.routes.getRouter());
     this.router.get("/amenities", getAmenities);
+    this.router.get("/route", getRoute);
     this.router.use("/nodes", jwtOnly, this.nodeContainer.routes.getRouter());
   }
 

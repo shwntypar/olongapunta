@@ -22,6 +22,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { config } from "./config/environment";
 import { NodeContainer } from "./modules/node/container";
+import bcryptjs from 'bcryptjs';
 
 export class App {
   public app: Application;
@@ -139,7 +140,8 @@ export class App {
         return;
       }
 
-      const bcryptjs = await import("bcryptjs");
+      //bcrypt error
+      // const bcryptjs = await import("bcryptjs");
       const adminPassword =
         config.superAdmin?.password || "SuperSecurePassword123!";
       const adminEmail =

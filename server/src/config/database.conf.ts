@@ -135,8 +135,10 @@ class DatabaseManager {
           `Database connected successfully. Active connections: ${DatabaseManager.connectionCount}`,
         );
       })
-      .catch((error) => {
-        logger.error("Database connection failed", { error: error.message });
+      .catch((error: unknown) => {
+        logger.error("Database connection failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
 
     // Set up graceful shutdown handler
