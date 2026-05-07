@@ -135,3 +135,15 @@
     @apply hidden!;
   }
 }
+
+/* Fixes the "floating" alignment of the portal popup */
+.mapboxgl-popup-content {
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 8px !important;
+}
+
+.mapboxgl-popup-tip {
+  display: none !important; /* Hides the little beak if it's misaligned */
+}
