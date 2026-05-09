@@ -6,10 +6,16 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 // Application Logic
-import { 
-  allMockRoutesFeatureCollection, 
+import {  
+  allMockRoutesFeatureCollection,
   fetchDrivingAlternatives, 
-  findBestJeepneyRouteFeature 
+  findBestJeepneyRouteFeature, 
+  fetchExactJeepneyPath,
+  fetchWalkingRoute,
+  extractRideSegment,
+  getClosestCoordIndex,
+  findNearestJeepneyRoute,
+  getDistanceMeters
 } from "../application/getDirections"; 
 import { mockRoutes } from "../domain/MockData";
 
@@ -98,101 +104,346 @@ export default function MapComponent() {
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<mapboxgl.Marker[]>([]);
 
-  // 🔴 Function: Route Navigation Logic
   const handleRouteRequest = async (place: any) => {
     if (!map.current) return;
     const currentMap = map.current;
 
-    // 🟢 ADD THIS: Remove the initial blue line if it exists
-    if (currentMap.getLayer("blue-marker-route-layer")) {
-      currentMap.removeLayer("blue-marker-route-layer");
-    }
-    if (currentMap.getSource("blue-marker-route")) {
-      currentMap.removeSource("blue-marker-route");
-    }
+    // 1. Hide the background Jeepney lines
+    mockRoutes.forEach(route => {
+      const fwdLayerId = `route-layer-${route.colorCode}-fwd`;
+      const revLayerId = `route-layer-${route.colorCode}-rev`;
+      if (currentMap.getLayer(fwdLayerId)) currentMap.setLayoutProperty(fwdLayerId, 'visibility', 'none');
+      if (currentMap.getLayer(revLayerId)) currentMap.setLayoutProperty(revLayerId, 'visibility', 'none');
+    });
 
     setSelectedPlace(place);
-    const { lon: endLon, lat: endLat } = place;
 
-    if ((window as any).currentDestMarker) (window as any).currentDestMarker.remove();
-    (window as any).currentDestMarker = new mapboxgl.Marker({ color: "#FF00FF" }) 
+    const endLon = parseFloat(place.lon);
+    const endLat = parseFloat(place.lat);
+    const startLon = USER_START_LOCATION[0];
+    const startLat = USER_START_LOCATION[1];
+
+    if (isNaN(endLon) || isNaN(endLat)) {
+      console.error("Coordinates missing!", place);
+      return; 
+    }
+
+    // 📍 ==========================================
+    // 📍 THE BULLETPROOF DESTINATION MARKER
+    // ==========================================
+    if ((window as any).currentDestMarker) {
+      (window as any).currentDestMarker.remove();
+    }
+
+    const markerEl = document.createElement('div');
+    markerEl.style.width = '24px';
+    markerEl.style.height = '24px';
+    markerEl.style.backgroundColor = '#FF00FF'; 
+    markerEl.style.borderRadius = '50%';
+    markerEl.style.border = '3px solid white';
+    markerEl.style.boxShadow = '0 0 10px rgba(0,0,0,0.6)';
+    markerEl.style.zIndex = '9999'; 
+
+    (window as any).currentDestMarker = new mapboxgl.Marker({ element: markerEl }) 
       .setLngLat([endLon, endLat])
       .addTo(currentMap);
 
+// ==========================================
+    // 🛣️ FETCHING ROUTES & WALKING PATHS
+    // ==========================================
+    // ==========================================
+    // 🛣️ FETCHING ROUTES & WALKING PATHS
+    // ==========================================
+    // ==========================================
+    // 🛣️ FETCHING ROUTES & WALKING PATHS
+    // ==========================================
     try {
-      let routeGeoJSON = await fetchDrivingAlternatives(
-        USER_START_LOCATION[0], USER_START_LOCATION[1], endLon, endLat
-      );
+      let finalColor = "#3b82f6"; 
+      let routeGeometry: any = null;
+      let walkingConnectorsGeoJSON: any = null;
+      let allCoordinatesToFrame: any[] = [];
+      
+      const directDistance = getDistanceMeters([startLon, startLat], [endLon, endLat]);
+      let needsFullWalk = directDistance < 400; // Walk if under 400m
+      let walkReason = `Destination is very close (${Math.round(directDistance)}m).`;
 
-      if (!routeGeoJSON?.features?.length) return;
-      routeGeoJSON.features = [...routeGeoJSON.features].reverse(); 
+      if (!needsFullWalk) {
+        // 🟢 1. USE THE SMART DISTANCE MATH (It won't miss the Yellow Line now!)
+        const transitRoute: any = findNearestJeepneyRoute(allMockRoutesFeatureCollection, [startLon, startLat], [endLon, endLat]);
 
-      const transitRoute = await findBestJeepneyRouteFeature(
-        USER_START_LOCATION[0], USER_START_LOCATION[1], endLon, endLat
-      );
+        if (transitRoute?.features && transitRoute.features.length > 0) {
+          
+          let fullRouteCoords = (transitRoute.features[0].geometry as any).coordinates;
+          if (Array.isArray(fullRouteCoords[0]) && Array.isArray(fullRouteCoords[0][0])) {
+              fullRouteCoords = fullRouteCoords.flat();
+          }
 
-      if (transitRoute?.features && transitRoute.features.length > 0) {
-        const jeepneyColor = transitRoute.features[0].properties?.routeColor;
-        routeGeoJSON.features.forEach((f: any) => {
-           if (f.properties) f.properties.routeColor = jeepneyColor;
-        });
+          const rawColor = transitRoute.features[0].properties?.routeColor;
+          finalColor = JEEPNEY_HEX_COLORS[rawColor] || rawColor || finalColor;
+          
+          let rideSegment = extractRideSegment(fullRouteCoords, [startLon, startLat], [endLon, endLat]);
+
+          if (rideSegment.length >= 2) {
+            const rawBoardingPoint = rideSegment[0];
+            const rawDropoffPoint = rideSegment[rideSegment.length - 1];
+
+            // 🟢 2. IS THE RIDE WORTH IT?
+            const walkToStartDist = getDistanceMeters([startLon, startLat], rawBoardingPoint);
+            const walkFromEndDist = getDistanceMeters(rawDropoffPoint, [endLon, endLat]);
+            const totalWalkForTransit = walkToStartDist + walkFromEndDist;
+
+            if (totalWalkForTransit > directDistance) {
+                needsFullWalk = true;
+                walkReason = "Walking to the Jeepney route is longer than walking directly to the destination.";
+            } else {
+                
+                // 🟢 3. PERFECT ROAD SNAPPING: Using your fetchExactJeepneyPath function!
+                console.log("Snapping the Jeepney ride segment to the exact road network...");
+                const snappedData: any = await fetchExactJeepneyPath(rideSegment);
+
+                // Check standard mapbox routing OR mapbox matching formats
+                if (snappedData?.routes?.[0]?.geometry) {
+                    routeGeometry = snappedData.routes[0].geometry;
+                } else if (snappedData?.matchings?.[0]?.geometry) {
+                    routeGeometry = snappedData.matchings[0].geometry;
+                } else {
+                    routeGeometry = { type: "LineString", coordinates: rideSegment };
+                }
+
+                allCoordinatesToFrame = [...routeGeometry.coordinates];
+
+                const boardingPoint = routeGeometry.coordinates[0];
+                const dropoffPoint = routeGeometry.coordinates[routeGeometry.coordinates.length - 1];
+
+                console.log("Fetching true walking paths to the Jeepney stops...");
+                
+                // 🟢 4. FETCH REAL WALKING ROUTES TO THE TERMINALS
+                const [walkToStartData, walkFromEndData] = await Promise.all([
+                  fetchWalkingRoute([startLon, startLat], boardingPoint),
+                  fetchWalkingRoute(dropoffPoint, [endLon, endLat])
+                ]);
+
+                const walkingFeatures = [];
+                
+                // Add Start Walk
+                if (walkToStartData?.routes?.[0]?.geometry) {
+                  walkingFeatures.push({ type: "Feature", properties: {}, geometry: walkToStartData.routes[0].geometry });
+                  allCoordinatesToFrame.push(...walkToStartData.routes[0].geometry.coordinates);
+                } else {
+                  walkingFeatures.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [[startLon, startLat], boardingPoint] } });
+                  allCoordinatesToFrame.push([startLon, startLat], boardingPoint);
+                }
+
+                // Add End Walk
+                if (walkFromEndData?.routes?.[0]?.geometry) {
+                  walkingFeatures.push({ type: "Feature", properties: {}, geometry: walkFromEndData.routes[0].geometry });
+                  allCoordinatesToFrame.push(...walkFromEndData.routes[0].geometry.coordinates);
+                } else {
+                  walkingFeatures.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [dropoffPoint, [endLon, endLat]] } });
+                  allCoordinatesToFrame.push(dropoffPoint, [endLon, endLat]);
+                }
+
+                walkingConnectorsGeoJSON = { type: "FeatureCollection", features: walkingFeatures };
+            }
+          } else {
+              needsFullWalk = true;
+              walkReason = "Jeepney ride is too short to be useful.";
+          }
+        } else {
+          needsFullWalk = true;
+          walkReason = "No Jeepney route found connecting these locations.";
+        }
       }
 
+      // 🟢 5. FULL WALK MODE
+      if (needsFullWalk) {
+        console.warn(`${walkReason} Fetching a full walking route.`);
+        const fullWalkData: any = await fetchWalkingRoute([startLon, startLat], [endLon, endLat]);
+        
+        if (fullWalkData?.routes?.[0]?.geometry) {
+          walkingConnectorsGeoJSON = {
+            type: "FeatureCollection",
+            features: [{ type: "Feature", properties: {}, geometry: fullWalkData.routes[0].geometry }]
+          };
+          allCoordinatesToFrame = [...fullWalkData.routes[0].geometry.coordinates];
+          routeGeometry = null; 
+        } else {
+          routeGeometry = { type: "LineString", coordinates: [[startLon, startLat], [endLon, endLat]] };
+          allCoordinatesToFrame = [[startLon, startLat], [endLon, endLat]];
+        }
+      }
+
+      const activeRouteGeoJSON = {
+        type: "FeatureCollection",
+        features: routeGeometry ? [{ type: "Feature", properties: {}, geometry: routeGeometry }] : []
+      }
+      
+      // ... (KEEP ALL DRAWING LOGIC BELOW EXACTLY THE SAME)
+
+      // drawing map lines
       const source = currentMap.getSource("active-route") as mapboxgl.GeoJSONSource;
       if (source) {
-        source.setData(routeGeoJSON);
+        source.setData(activeRouteGeoJSON as any);
+        currentMap.setPaintProperty("active-route-layer", "line-color", finalColor);
+        currentMap.setLayoutProperty("active-route-layer", "visibility", "visible");
       } else {
-        currentMap.addSource("active-route", { type: "geojson", data: routeGeoJSON });
+        currentMap.addSource("active-route", { type: "geojson", data: activeRouteGeoJSON as any });
         currentMap.addLayer({
           id: "active-route-layer",
           type: "line",
           source: "active-route",
-          layout: { "line-join": "round", "line-cap": "round" },
-          paint: { "line-color": ["get", "routeColor"], "line-width": 8, "line-opacity": 0.9 },
+          layout: { "line-join": "round", "line-cap": "round", "visibility": "visible" },
+          paint: { "line-color": finalColor, "line-width": 8, "line-opacity": 0.9 },
         });
       }
 
+      // ==========================================
+      // 🚶 DRAWING THE WALKING CONNECTORS
+      // ==========================================
+      const walkSource = currentMap.getSource("active-walking-route") as mapboxgl.GeoJSONSource;
+      
+      if (walkingConnectorsGeoJSON) {
+        if (walkSource) {
+          walkSource.setData(walkingConnectorsGeoJSON);
+          currentMap.setLayoutProperty("active-walking-layer", "visibility", "visible");
+          currentMap.setPaintProperty("active-walking-layer", "line-color", finalColor);
+        } else {
+          currentMap.addSource("active-walking-route", { type: "geojson", data: walkingConnectorsGeoJSON });
+          currentMap.addLayer({
+            id: "active-walking-layer",
+            type: "line",
+            source: "active-walking-route",
+            layout: { "line-join": "round", "line-cap": "round", "visibility": "visible" },
+            paint: { 
+              "line-color": finalColor, 
+              "line-width": 4,          
+              "line-dasharray": [2, 2], // Dashed to indicate walking!
+              "line-opacity": 0.8 
+            },
+          });
+        }
+      } else if (walkSource) {
+        currentMap.setLayoutProperty("active-walking-layer", "visibility", "none");
+      }
+
+      // 🎥 Smoothly zoom the camera to fit EVERYTHING (walking paths + main path)
       const bounds = new mapboxgl.LngLatBounds();
-      routeGeoJSON.features.forEach((f: any) => {
-        if (f.geometry?.coordinates) f.geometry.coordinates.forEach((c: any) => bounds.extend(c));
-      });
+      allCoordinatesToFrame.forEach((c: any) => bounds.extend(c));
       currentMap.fitBounds(bounds, { padding: 60, duration: 1200 });
-    } catch (error) { console.error("Routing Error:", error); }
+
+    } catch (error) { 
+      console.error("Routing Error:", error); 
+    }
   };
 
-  // 🔵 Function: Blue Jeepney Marker Line
-  const drawBlueJeepneyRoute = async () => {
-    if (!map.current) return;
+  const JEEPNEY_HEX_COLORS: Record<string, string> = {
+    "BLUE": "#2563eb",   
+    "RED": "#ef4444",    
+    "YELLOW": "#eab308", 
+    "GREEN": "#22c55e",  
+  };
+
+  const drawJeepneyRouteLine = async (jeepney: any) => {
+    const routeName = jeepney?.colorCode || "UNKNOWN_ROUTE";
+    console.log(`🟣 [DRAW-DEBUG 1] Starting draw process for ${routeName}`, jeepney);
+
+    if (!map.current) {
+      console.error(`🟣 [DRAW-DEBUG ERROR] map.current is missing! Cannot draw ${routeName}.`);
+      return;
+    }
+    if (!jeepney?.path || jeepney.path.length < 2) {
+      console.warn(`🟣 [DRAW-DEBUG WARNING] ${routeName} has invalid path coordinates!`, jeepney?.path);
+      return;
+    }
+    
+    const actualColor = JEEPNEY_HEX_COLORS[jeepney.colorCode] || "#000000";
     const currentMap = map.current;
 
-    const blueRoute = mockRoutes.find(r => r.colorCode === 'BLUE');
-    if (!blueRoute?.path || blueRoute.path.length < 2) return;
+    // ==========================================
+    // FORWARD PATH
+    // ==========================================
+    const fwdSourceId = `route-source-${jeepney.colorCode}-fwd`;
+    const fwdLayerId = `route-layer-${jeepney.colorCode}-fwd`;
 
+    console.log(`🟣 [DRAW-DEBUG 2] Fetching FWD directions for ${routeName}...`);
     try {
-      let routeGeoJSON = await fetchDrivingAlternatives(
-        blueRoute.path[0][0], blueRoute.path[0][1],
-        blueRoute.path[blueRoute.path.length - 1][0], blueRoute.path[blueRoute.path.length - 1][1]
-      );
-      if (!routeGeoJSON?.features?.length) return;
+      // 🟢 1. Use the new cycling fetcher instead of driving alternatives
+      const fwdData: any = await fetchExactJeepneyPath(jeepney.path);
+      
+      let fwdGeoJSON;
 
-      routeGeoJSON.features.forEach((f: any) => {
-        if (f.properties) f.properties.routeColor = "#0000FF";
-      });
-
-      const source = currentMap.getSource("blue-marker-route") as mapboxgl.GeoJSONSource;
-      if (source) {
-        source.setData(routeGeoJSON);
+      if (fwdData?.routes?.[0]?.geometry) {
+        // Mapbox successfully snapped to the road using the cycling profile!
+        fwdGeoJSON = {
+          type: "Feature", properties: {}, geometry: fwdData.routes[0].geometry
+        };
       } else {
-        currentMap.addSource("blue-marker-route", { type: "geojson", data: routeGeoJSON });
+        // Absolute last resort fallback
+        fwdGeoJSON = {
+          type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: jeepney.path }
+        };
+      }
+
+      const fwdSource = currentMap.getSource(fwdSourceId) as mapboxgl.GeoJSONSource;
+      if (fwdSource) {
+        fwdSource.setData(fwdGeoJSON as any);
+      } else {
+        currentMap.addSource(fwdSourceId, { type: "geojson", data: fwdGeoJSON as any });
         currentMap.addLayer({
-          id: "blue-marker-route-layer",
+          id: fwdLayerId,
           type: "line",
-          source: "blue-marker-route",
+          source: fwdSourceId,
           layout: { "line-join": "round", "line-cap": "round" },
-          paint: { "line-color": ["get", "routeColor"], "line-width": 8, "line-opacity": 0.9 },
+          paint: { "line-color": actualColor, "line-width": 8, "line-opacity": 0.9 },
         });
       }
-    } catch (error) { console.error("Error drawing Blue Marker line:", error); }
+    } catch (error) { 
+      console.error(`Error with FWD path for ${routeName}:`, error); 
+    }
+
+    // ==========================================
+    // REVERSE PATH
+    // ==========================================
+    const revSourceId = `route-source-${jeepney.colorCode}-rev`;
+    const revLayerId = `route-layer-${jeepney.colorCode}-rev`;
+    
+    const returnPath = [...jeepney.path].reverse();
+
+    console.log(`🟣 [DRAW-DEBUG 5] Fetching REV directions for ${routeName}...`);
+    try {
+      // 🟢 1. Use the new cycling fetcher instead of driving alternatives
+      const revData: any = await fetchExactJeepneyPath(returnPath);
+      
+      let revGeoJSON;
+
+      if (revData?.routes?.[0]?.geometry) {
+        // Mapbox successfully snapped to the road using the cycling profile!
+        revGeoJSON = {
+          type: "Feature", properties: {}, geometry: revData.routes[0].geometry
+        };
+      } else {
+        // Absolute last resort fallback
+        revGeoJSON = {
+          type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: jeepney.path }
+        };
+      }
+
+      const revSource = currentMap.getSource(revSourceId) as mapboxgl.GeoJSONSource;
+      if (revSource) {
+        revSource.setData(revGeoJSON as any);
+      } else {
+        currentMap.addSource(revSourceId, { type: "geojson", data: revGeoJSON as any });
+        currentMap.addLayer({
+          id: revLayerId,
+          type: "line",
+          source: revSourceId,
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": actualColor, "line-width": 8, "line-opacity": 0.9 },
+        });
+      }
+    } catch (error) { 
+      console.error(`Error with FWD path for ${routeName}:`, error); 
+    }
   };
 
   useEffect(() => {
@@ -220,13 +471,24 @@ export default function MapComponent() {
 
     currentMap.on("load", async () => {
       // Background lines
-      currentMap.addSource("background-routes", { type: "geojson", data: allMockRoutesFeatureCollection() });
-      currentMap.addLayer({
-        id: "background-routes-layer",
-        type: "line",
-        source: "background-routes",
-        paint: { "line-color": ["get", "routeColor"], "line-width": 4, "line-opacity": 0.4 },
+      // currentMap.addSource("background-routes", { type: "geojson", data: allMockRoutesFeatureCollection() });
+      // currentMap.addLayer({
+      //   id: "background-routes-layer",
+      //   type: "line",
+      //   source: "background-routes",
+      //   paint: { "line-color": ["get", "routeColor"], "line-width": 4, "line-opacity": 0.4 },
+      // });
+
+      mockRoutes.forEach((jeepney) => {
+        void drawJeepneyRouteLine(jeepney);
       });
+
+      // mockRoutes.forEach(r => {
+      //   const lid = `route-layer-${r.colorCode}`;
+      //   if (map.current?.getLayer(lid)) {
+      //     map.current.setLayoutProperty(lid, 'visibility', 'none');
+      //   }
+      // });
 
       // User Marker
       const startEl = document.createElement("div");
@@ -234,9 +496,6 @@ export default function MapComponent() {
       startEl.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
       
       startMarkerRef.current = new mapboxgl.Marker({ element: startEl }).setLngLat(USER_START_LOCATION).addTo(currentMap);
-
-      // RESTORED: Blue Route Initialization
-      void drawBlueJeepneyRoute();
 
       // Amenities & Click-to-Popup
       try {
@@ -284,11 +543,30 @@ export default function MapComponent() {
         createPortal(
           <AmenityPopupBox 
             place={selectedPlace} 
-            onClose={() => { 
-              setSelectedPlace(null); 
-              const p = document.getElementsByClassName('mapboxgl-popup'); 
-              while(p[0]) p[0].remove(); 
-            }} 
+            onClose={() => {
+              setSelectedPlace(null);
+              
+              // 1. Show the background routes again
+              mockRoutes.forEach(r => {
+                const fwdLayerId = `route-layer-${r.colorCode}-fwd`;
+                const revLayerId = `route-layer-${r.colorCode}-rev`;
+                
+                if (map.current?.getLayer(fwdLayerId)) {
+                  map.current.setLayoutProperty(fwdLayerId, 'visibility', 'visible');
+                }
+                if (map.current?.getLayer(revLayerId)) {
+                  map.current.setLayoutProperty(revLayerId, 'visibility', 'visible');
+                }
+              });
+
+              // 2. Hide the active route & marker to clean up the map
+              if (map.current?.getLayer("active-route-layer")) {
+                map.current.setLayoutProperty("active-route-layer", 'visibility', 'none');
+              }
+              if ((window as any).currentDestMarker) {
+                (window as any).currentDestMarker.remove();
+              }
+            }}
             onGetDirections={handleRouteRequest}
           />,
           document.getElementById("popup-portal-root")!

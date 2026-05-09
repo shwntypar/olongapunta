@@ -122,14 +122,15 @@ export async function fetchJeepneyPathWithFallback(
 /**
  * Point A → B with alternative routes (Direct Mapbox API Call).
  */
-export async function fetchDrivingAlternatives(
-  startLng: number,
-  startLat: number,
-  endLng: number,
-  endLat: number,
-): Promise<FeatureCollection | null> {
-  console.log(`\n================================================`);
-  console.log(`📍 [A-TO-B ROUTE] Fetching route from (${startLng}, ${startLat}) to (${endLng}, ${endLat})`);
+export const fetchDrivingAlternatives = async (pathCoordinates: number [][]): Promise<FeatureCollection | null> => {
+
+  //slicing the paths
+  const safeCoordinates = pathCoordinates.slice(0, 25);
+  console.log(`📍 [A-TO-B ROUTE] Fetching route from ${safeCoordinates}`);
+
+  const coordinateString = safeCoordinates
+    .map(coord => `${coord[0]},${coord[1]}`)
+    .join(";");
 
   try {
     if (!MAPBOX_TOKEN) {
@@ -137,8 +138,7 @@ export async function fetchDrivingAlternatives(
       return null;
     }
 
-    const coordinates = `${startLng},${startLat};${endLng},${endLat}`;
-    const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${coordinates}?alternatives=true&overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinateString}?alternatives=true&overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
     
     console.log(`🚀 [A-TO-B ROUTE] Hitting Mapbox URL:`, url.replace(MAPBOX_TOKEN, "HIDDEN_TOKEN"));
     
@@ -246,3 +246,110 @@ export async function findBestJeepneyRouteFeature(
     features: [routeFeature]
   };
 }
+
+// 🚶 Get the true walking path, distance, and time
+export const fetchWalkingRoute = async (startCoord: number[], endCoord: number[]) => {
+  const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${startCoord[0]},${startCoord[1]};${endCoord[0]},${endCoord[1]}?geometries=geojson&overview=full&access_token=${process.env.NEXT_PUBLIC_MAPBOX_TOKEN}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Failed to fetch walking path");
+    return await response.json(); 
+  } catch (error) {
+    console.error("Error fetching walking path:", error);
+    return null;
+  }
+};
+
+//Fetch the exact, pre-drawn geometry for a specific Jeepney route
+// 🟢 Dedicated function for drawing strict Jeepney paths
+export const fetchExactJeepneyPath = async (pathCoordinates: number[][]) => {
+  // Mapbox limit: 25 coordinates max per request
+  const safeCoordinates = pathCoordinates.slice(0, 25);
+  
+  const coordinateString = safeCoordinates
+    .map(coord => `${coord[0]},${coord[1]}`)
+    .join(";");
+
+  // 🚨 THE MAGIC URL: alternatives=false & continue_straight=true & overview=full
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinateString}?alternatives=false&continue_straight=true&geometries=geojson&overview=full&access_token=${process.env.NEXT_PUBLIC_MAPBOX_TOKEN}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Failed to fetch jeepney path");
+    
+    const data = await response.json();
+    return data; 
+  } catch (error) {
+    console.error("Error fetching exact jeepney path:", error);
+    return null;
+  }
+};
+
+// 🧮 Helper: Find the closest coordinate index using Pythagorean distance
+export const getClosestCoordIndex = (routeCoords: number[][], targetLonLat: number[]) => {
+  let minIdx = 0;
+  let minDist = Infinity;
+  routeCoords.forEach((coord, i) => {
+    const dist = Math.pow(coord[0] - targetLonLat[0], 2) + Math.pow(coord[1] - targetLonLat[1], 2);
+    if (dist < minDist) {
+      minDist = dist;
+      minIdx = i;
+    }
+  });
+  return minIdx;
+};
+
+// ✂️ Helper: Slice the Jeepney route down to just the part the user is riding
+export const extractRideSegment = (fullRouteCoords: number[][], startLonLat: number[], endLonLat: number[]) => {
+  const startIndex = getClosestCoordIndex(fullRouteCoords, startLonLat);
+  const endIndex = getClosestCoordIndex(fullRouteCoords, endLonLat);
+
+  // Return the sliced array (handling if they are riding forward or backward on the line)
+  if (startIndex <= endIndex) {
+    return fullRouteCoords.slice(startIndex, endIndex + 1);
+  } else {
+    return fullRouteCoords.slice(endIndex, startIndex + 1).reverse();
+  }
+};
+
+// 📏 Helper: Get real-world distance in meters between two coordinates
+// 📏 Helper: Get real-world distance in meters
+export const getDistanceMeters = (coord1: number[], coord2: number[]) => {
+  const R = 6371e3; 
+  const lat1 = coord1[1] * Math.PI/180;
+  const lat2 = coord2[1] * Math.PI/180;
+  const deltaLat = (coord2[1]-coord1[1]) * Math.PI/180;
+  const deltaLon = (coord2[0]-coord1[0]) * Math.PI/180;
+  const a = Math.sin(deltaLat/2) * Math.sin(deltaLat/2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon/2) * Math.sin(deltaLon/2);
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+};
+
+// 🎯 The True Transit Engine
+export const findNearestJeepneyRoute = (allRoutesCollection: any, startLonLat: number[], endLonLat: number[]) => {
+  let bestRoute = null;
+  let lowestWalkScore = Infinity;
+
+  if (!allRoutesCollection?.features) return null;
+
+  allRoutesCollection.features.forEach((route: any) => {
+    let fullCoords = route.geometry.coordinates;
+    if (Array.isArray(fullCoords[0]) && Array.isArray(fullCoords[0][0])) fullCoords = fullCoords.flat();
+
+    const startIndex = getClosestCoordIndex(fullCoords, startLonLat);
+    const endIndex = getClosestCoordIndex(fullCoords, endLonLat);
+
+    if (startIndex === endIndex) return;
+
+    const walkToStart = getDistanceMeters(startLonLat, fullCoords[startIndex]);
+    const walkFromEnd = getDistanceMeters(fullCoords[endIndex], endLonLat);
+    const totalWalk = walkToStart + walkFromEnd;
+
+    if (totalWalk < lowestWalkScore) {
+      lowestWalkScore = totalWalk;
+      bestRoute = route;
+    }
+  });
+
+  return bestRoute ? { features: [bestRoute] } : null;
+};
