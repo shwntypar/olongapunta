@@ -73,6 +73,8 @@ model Node {
   todaZone   TodaZone?   @relation("TerminalNode")
   landmarks  Landmark[]
 
+  // Spatial index for geospatial queries (nearby landmarks, geo-boundaries)
+  @@index([lat, lng])
   @@map("nodes")
 }
 
@@ -168,13 +170,21 @@ model FareMatrix {
 // ─── Landmarks ────────────────────────────────────────────
 
 model Landmark {
-  id              String  @id @default(uuid()) @map("id")
-  name            String  @map("name")
-  category        String  @map("category") 
-  nodeId          String  @map("node_id")
-  geofenceRadiusM Int     @default(50) @map("geofence_radius_m")
+  id              String   @id @default(uuid()) @map("id")
+  osmId           String   @unique @map("osm_id") 
+  osmType         String   @map("osm_type") 
+  name            String   @map("name")
+  category        String   @map("category") 
+  tags            Json     @default("{}") @map("tags") 
+  nodeId          String   @map("node_id")
+  geofenceRadiusM Int      @default(50) @map("geofence_radius_m")
+  syncedAt        DateTime @default(now()) @updatedAt @map("synced_at") 
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  node Node @relation(fields: [nodeId], references: [id])
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
 
+  // Indexes for efficient filtering
+  @@index([category])
   @@map("landmarks")
 }
