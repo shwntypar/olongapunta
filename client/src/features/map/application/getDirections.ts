@@ -22,14 +22,6 @@ export function jeepneyRouteToLineFeature(route: JeepneyRoute): Feature<LineStri
   };
 }
 
-// export function JeepneyRoutes(routes: JeepneyRoute[]): FeatureCollection {
-//   const routes = mockRoutes;
-//   return {
-//     type: "FeatureCollection",
-//     features: routes.map(jeepneyRouteToLineFeature),
-//   };
-// }
-
 export function allMockRoutesFeatureCollection(): FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -76,7 +68,6 @@ export async function fetchJeepneyPathFromMapbox(
 
     const response = await fetch(url);
     
-    // 🔍 THE FIX: Actually read what Mapbox is saying when it fails!
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`❌ [JEEPNEY ROUTE] Mapbox API Failed! Status: ${response.status}`);
@@ -123,8 +114,6 @@ export async function fetchJeepneyPathWithFallback(
  * Point A → B with alternative routes (Direct Mapbox API Call).
  */
 export const fetchDrivingAlternatives = async (pathCoordinates: number [][]): Promise<FeatureCollection | null> => {
-
-  //slicing the paths
   const safeCoordinates = pathCoordinates.slice(0, 25);
   console.log(`📍 [A-TO-B ROUTE] Fetching route from ${safeCoordinates}`);
 
@@ -144,7 +133,6 @@ export const fetchDrivingAlternatives = async (pathCoordinates: number [][]): Pr
     
     const response = await fetch(url);
     
-    // 🔍 THE FIX: Actually read what Mapbox is saying when it fails!
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`❌ [A-TO-B ROUTE] Mapbox API Failed! Status: ${response.status}`);
@@ -162,7 +150,6 @@ export const fetchDrivingAlternatives = async (pathCoordinates: number [][]): Pr
 
     const routeColors = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed"];
 
-    // Format the raw Mapbox response into the FeatureCollection your map expects
     const routeFeatures = data.routes.map((route: any, index: number) => {
       const isFastest = index === 0;
       const routeColor = routeColors[index % routeColors.length] ?? "#2563eb";
@@ -192,7 +179,9 @@ export const fetchDrivingAlternatives = async (pathCoordinates: number [][]): Pr
   }
 }
 
-// --- ADD THESE TO THE BOTTOM OF getDirections.ts ---
+// ==========================================
+// 🧮 SMART TRANSIT MATH & SLICING 
+// ==========================================
 
 /** Calculates distance between two coordinates in kilometers (Haversine formula) */
 export function getDistanceFromLatLonInKm(lon1: number, lat1: number, lon2: number, lat2: number) {
@@ -206,8 +195,7 @@ export function getDistanceFromLatLonInKm(lon1: number, lat1: number, lon2: numb
   return R * c;
 }
 
-/** 
- * Automatically finds the best Jeepney route between a start and end point.
+/** * Automatically finds the best Jeepney route between a start and end point.
  * Checks if a route has stops within a walkable distance (default 0.5km / 500m) of BOTH points.
  */
 export async function findBestJeepneyRouteFeature(
@@ -217,16 +205,11 @@ export async function findBestJeepneyRouteFeature(
   let minTotalWalk = Infinity;
 
   for (const route of mockRoutes) {
-    // 1. Distance to closest stop from the Start point
     let distToStart = Math.min(...route.stops.map(s => getDistanceFromLatLonInKm(startLng, startLat, s.lng, s.lat)));
-    
-    // 2. Distance to closest stop from the Destination point
     let distToDest = Math.min(...route.stops.map(s => getDistanceFromLatLonInKm(endLng, endLat, s.lng, s.lat)));
 
-    // 3. If both stops are within walking distance...
     if (distToStart <= maxWalkKm && distToDest <= maxWalkKm) {
       const totalWalk = distToStart + distToDest;
-      // Pick the route that requires the least amount of walking overall
       if (totalWalk < minTotalWalk) {
         minTotalWalk = totalWalk;
         bestRoute = route;
@@ -237,8 +220,6 @@ export async function findBestJeepneyRouteFeature(
   if (!bestRoute) return null;
 
   console.log(`🚌 Best Jeepney Route found: ${bestRoute.routeName}. Fetching its path...`);
-  
-  // Use your existing fallback function to get the actual Mapbox driving line for this jeepney!
   const routeFeature = await fetchJeepneyPathWithFallback(bestRoute);
 
   return {
@@ -249,7 +230,7 @@ export async function findBestJeepneyRouteFeature(
 
 // 🚶 Get the true walking path, distance, and time
 export const fetchWalkingRoute = async (startCoord: number[], endCoord: number[]) => {
-  const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${startCoord[0]},${startCoord[1]};${endCoord[0]},${endCoord[1]}?geometries=geojson&overview=full&access_token=${process.env.NEXT_PUBLIC_MAPBOX_TOKEN}`;
+  const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${startCoord[0]},${startCoord[1]};${endCoord[0]},${endCoord[1]}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
 
   try {
     const response = await fetch(url);
@@ -261,25 +242,16 @@ export const fetchWalkingRoute = async (startCoord: number[], endCoord: number[]
   }
 };
 
-//Fetch the exact, pre-drawn geometry for a specific Jeepney route
 // 🟢 Dedicated function for drawing strict Jeepney paths
 export const fetchExactJeepneyPath = async (pathCoordinates: number[][]) => {
-  // Mapbox limit: 25 coordinates max per request
   const safeCoordinates = pathCoordinates.slice(0, 25);
-  
-  const coordinateString = safeCoordinates
-    .map(coord => `${coord[0]},${coord[1]}`)
-    .join(";");
-
-  // 🚨 THE MAGIC URL: alternatives=false & continue_straight=true & overview=full
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinateString}?alternatives=false&continue_straight=true&geometries=geojson&overview=full&access_token=${process.env.NEXT_PUBLIC_MAPBOX_TOKEN}`;
+  const coordinateString = safeCoordinates.map(coord => `${coord[0]},${coord[1]}`).join(";");
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinateString}?alternatives=false&continue_straight=true&geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
 
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error("Failed to fetch jeepney path");
-    
-    const data = await response.json();
-    return data; 
+    return await response.json(); 
   } catch (error) {
     console.error("Error fetching exact jeepney path:", error);
     return null;
@@ -305,7 +277,6 @@ export const extractRideSegment = (fullRouteCoords: number[][], startLonLat: num
   const startIndex = getClosestCoordIndex(fullRouteCoords, startLonLat);
   const endIndex = getClosestCoordIndex(fullRouteCoords, endLonLat);
 
-  // Return the sliced array (handling if they are riding forward or backward on the line)
   if (startIndex <= endIndex) {
     return fullRouteCoords.slice(startIndex, endIndex + 1);
   } else {
@@ -313,7 +284,6 @@ export const extractRideSegment = (fullRouteCoords: number[][], startLonLat: num
   }
 };
 
-// 📏 Helper: Get real-world distance in meters between two coordinates
 // 📏 Helper: Get real-world distance in meters
 export const getDistanceMeters = (coord1: number[], coord2: number[]) => {
   const R = 6371e3; 

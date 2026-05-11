@@ -1,5 +1,7 @@
 export type JeepneyColor = 'YELLOW' | 'BLUE' | 'RED' | 'GREEN';
 
+// 📍 Temporary hardcoded user location (Marikit Park area) for testing
+export const USER_START_LOCATION = [120.2831, 14.8299];
 /** Hex colors for Mapbox line layers (jeepney coding). */
 export const JEEPNEY_COLOR_HEX: Record<JeepneyColor, string> = {
   YELLOW: '#ca8a04',
