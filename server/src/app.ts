@@ -22,7 +22,10 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { config } from "./config/environment";
 import { NodeContainer } from "./modules/node/container";
-import bcryptjs from 'bcryptjs';
+import { initializeSyncJob, stopSyncJob } from "./core/jobs/sync-landmarks.job";
+import bcryptjs from "bcryptjs";
+import { AmenitiesContainer } from "./modules/node/amenities/container";
+import { referenceCache } from "./core/cache/cache-reference";
 
 export class App {
   public app: Application;
@@ -33,6 +36,7 @@ export class App {
   // modules
   private authContainer: AuthContainer;
   private nodeContainer: NodeContainer;
+  private amenitiesContainer: AmenitiesContainer;
 
   constructor() {
     this.app = express();
@@ -42,6 +46,7 @@ export class App {
     // modules
     this.authContainer = new AuthContainer(this.prisma);
     this.nodeContainer = new NodeContainer(this.prisma);
+    this.amenitiesContainer = new AmenitiesContainer(this.prisma);
 
     this.configureMiddle();
     this.setupRoutes();
@@ -69,6 +74,7 @@ export class App {
       this.prisma,
       this.authContainer,
       this.nodeContainer,
+      this.amenitiesContainer,
     );
 
     this.app.use("/api", this.appRoutes.getRouter());
@@ -177,6 +183,25 @@ export class App {
       this.server.listen(port, () => {
         logger.info(`Server running on http://localhost:${port}`);
       });
+
+      const syncJobEnabled =
+        config.env !== "development" || process.env.SYNC_JOB_ENABLED === "true";
+      const cronExpression = process.env.SYNC_JOB_CRON || "0 2 * * *";
+
+      logger.info(
+        `Initializing landmark sync job (enabled: ${syncJobEnabled}, cron: ${cronExpression})...`,
+      );
+
+      await initializeSyncJob({
+        enabled: syncJobEnabled,
+        cronExpression,
+      });
+
+      if (syncJobEnabled) {
+        logger.info(`Landmark sync job initialized: ${cronExpression}`);
+      } else {
+        logger.info("Landmark sync job is disabled (dev mode)");
+      }
     } catch (error) {
       logger.error("Failed to start server:", error);
       await this.stop();
@@ -186,6 +211,7 @@ export class App {
 
   public async stop(): Promise<void> {
     try {
+      stopSyncJob();
       await this.prisma.$disconnect();
       logger.info("Disconnected from database");
     } catch (error) {
