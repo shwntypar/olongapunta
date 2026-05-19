@@ -19,12 +19,25 @@ import Sidebar, { TravelMode } from "./sidebar";
 const ICON_PATHS: Record<string, string> = {
   "townhall": "M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10",
   "hospital": "M12 6v12 M6 12h12",
+  "clinic": "M12 6v12 M6 12h12",
   "police": "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
-  "bus_station": "M8 6h8 M6 10h12 M12 21v-4 M9 21h6 M4 18V9a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9",
   "school": "M22 10v6M2 10l10-5 10 5-10 5z M6 12v5c0 2 2 3 6 3s6-1 6-3v-5",
+  "university": "M22 10v6M2 10l10-5 10 5-10 5z M6 12v5c0 2 2 3 6 3s6-1 6-3v-5",
   "bank": "M3 21h18 M3 10h18 M5 6l7-3 7 3 M4 10v11 M11 10v11 M15 10v11 M20 10v11",
-  "user": "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2 M12 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"
+  "supermarket": "M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z",
+  "restaurant": "M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2H3zm10 0v20h2V2h-2z",
+  "cafe": "M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z M6 1v3 M10 1v3 M14 1v3"
 };
+
+function getCategoryColor(type: string) {
+  const t = (type || "").toLowerCase();
+  if (['hospital', 'clinic', 'pharmacy', 'dentist'].includes(t)) return '#ef4444'; // Red for Healthcare
+  if (['school', 'university', 'college'].includes(t)) return '#3b82f6'; // Blue for Education
+  if (['bank', 'atm'].includes(t)) return '#10b981'; // Green for Finance
+  if (['supermarket', 'mall', 'marketplace', 'restaurant', 'cafe', 'fast_food'].includes(t)) return '#f59e0b'; // Orange for Food/Retail
+  if (['townhall', 'police', 'fire_station', 'post_office'].includes(t)) return '#8b5cf6'; // Purple for Government
+  return '#64748b'; // Slate Gray for everything else
+}
 
 const JEEPNEY_HEX_COLORS: Record<string, string> = {
   YELLOW: '#ca8a04',
@@ -39,7 +52,10 @@ const JEEPNEY_HEX_COLORS: Record<string, string> = {
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 mapboxgl.accessToken = MAPBOX_TOKEN;
-const USER_START_LOCATION = [120.283479, 14.837409] as [number, number];
+const DEFAULT_CITY_CENTER = [
+  120.2843319,
+  14.8388901
+] as [number, number];
 
 const AMENITY_PRIORITY: Record<string, number> = {
   "townhall": 1, "hospital": 1, "police": 1, "fire_station": 1, "bus_station": 1, 
@@ -52,15 +68,6 @@ const AMENITY_PRIORITY: Record<string, number> = {
 };
 
 // 🟢 NEW: Samples an array down to 24 points so Mapbox doesn't crash!
-const sampleCoordinates = (coords: number[][], maxPoints = 24) => {
-  if (coords.length <= maxPoints) return coords;
-  const step = (coords.length - 1) / (maxPoints - 1);
-  const sampled = [];
-  for (let i = 0; i < maxPoints; i++) {
-    sampled.push(coords[Math.round(i * step)]);
-  }
-  return sampled;
-};
 
 function getPriority(type: string): number {
   return AMENITY_PRIORITY[type.toLowerCase()] || 3;
@@ -77,22 +84,28 @@ function createCustomMarkerElement(type: string, priority: number) {
   el.style.cursor = "pointer";
   el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
 
-  let bgColor = priority === 1 ? "#000000" : priority === 2 ? "#F59E0B" : "#EF4444"; 
-  let size = priority === 1 ? "28px" : priority === 2 ? "22px" : "12px";
-  let iconSize = priority === 1 ? 16 : priority === 2 ? 14 : 0;
+  // 1. Keep the size strictly uniform so the map stays clean
+  const uniformSize = "24px";
+  const uniformIconSize = 14;
+  
+  // 2. Fetch the dynamic color based on the amenity type!
+  const bgColor = getCategoryColor(type); 
 
-  el.style.width = size;
-  el.style.height = size;
+  el.style.width = uniformSize;
+  el.style.height = uniformSize;
   el.style.backgroundColor = bgColor;
 
-  if (priority <= 2) {
-    const path = ICON_PATHS[type] || ICON_PATHS["bank"];
-    el.innerHTML = `
-      <svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="${path}"></path>
-      </svg>`;
-  }
+  // 3. Fetch the specific SVG icon (or use a default map pin icon if not found)
+  const path = ICON_PATHS[type.toLowerCase()] || "M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"; 
+
+  el.innerHTML = `
+    <svg width="${uniformIconSize}" height="${uniformIconSize}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="${path}"></path>
+    </svg>`;
+    
+  // Keep the priority attached for the zoom-visibility logic!
   el.dataset.priority = priority.toString();
+  
   return el;
 }
 
@@ -133,7 +146,49 @@ export default function MapComponent() {
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<mapboxgl.Marker[]>([]);
   const routeEndpointMarkers = useRef<mapboxgl.Marker[]>([]);
+  
+  // 🟢 NEW: A reference the map can instantly read to check if we are navigating
+  const isRoutingModeRef = useRef(false);
+  
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const liveCoords = [position.coords.longitude, position.coords.latitude];
+          
+          // 1. Set the Origin state so the app knows where they are
+          setOrigin({
+            name: "My Current Location",
+            coords: liveCoords
+          });
 
+          // 2. Move the blue Start Marker to their location
+          if (startMarkerRef.current) {
+            startMarkerRef.current.setLngLat(liveCoords as any);
+          }
+
+          // 3. Smoothly fly the camera to their location
+          if (map.current) {
+            map.current.flyTo({ center: liveCoords as any, zoom: 15, duration: 2000 });
+          }
+        },
+        (error) => {
+          console.warn("User denied GPS on load or signal failed:", error);
+          // If they deny it, the map just stays at the DEFAULT_CITY_CENTER
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    }
+  }, []);
+
+  // 🟢 NEW: Keep the reference perfectly synced with your state
+  useEffect(() => {
+    if (isRoutingMode && origin && selectedPlace) {
+      handleRouteRequest(selectedPlace, travelMode, origin.coords);
+    }
+  }, [origin, travelMode, isRoutingMode, selectedPlace]); 
+  // Because 'origin' is in the array, changing your pin recalculates the route instantly!
+  
   useEffect(() => {
     isPickingOriginRef.current = isPickingOrigin;
   }, [isPickingOrigin]);
@@ -262,18 +317,75 @@ export default function MapComponent() {
     }
   }, [origin, travelMode, isRoutingMode, selectedPlace]);
 
+  // ==========================================
+  // 🟢 NEW: LIVE GPS LOCATOR
+  // ==========================================
+  const requestGpsLocation = (destinationPlace: any) => {
+    if (!navigator.geolocation) {
+      // Browser doesn't support GPS at all -> Fallback to manual pin
+      console.warn("Geolocation is not supported by this browser.");
+      setIsPickingOrigin(true);
+      return;
+    }
+
+    // Optional: You could add a temporary instruction here like "Locating you..."
+    setRouteInstructions([{ maneuver: { instruction: "📡 Acquiring GPS location..." }, distance: 0 }]);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        // SUCCESS! User allowed GPS.
+        const userCoords = [position.coords.longitude, position.coords.latitude];
+        
+        // Update the origin state
+        setOrigin({
+          name: "My Current Location",
+          coords: userCoords
+        });
+
+        // Snap the start marker to their real location
+        if (startMarkerRef.current) {
+          startMarkerRef.current.setLngLat(userCoords as any);
+        }
+
+        // We must call handleRouteRequest manually here because the state update 
+        // for `origin` might not be fast enough for the next line of code
+        handleRouteRequest(destinationPlace, travelMode, userCoords);
+      },
+      (error) => {
+        // FAILED OR DENIED! User blocked GPS or signal is weak.
+        console.warn("GPS Error:", error.message);
+        
+        // Clear the "Acquiring..." message
+        setRouteInstructions([]);
+        
+        // Fallback: Turn on the "Drop a Pin" mode automatically!
+        setIsPickingOrigin(true); 
+      },
+      { 
+        enableHighAccuracy: true, // Use the actual GPS chip if available
+        timeout: 10000,           // Give up after 10 seconds
+        maximumAge: 0             // Don't use a cached location
+      }
+    );
+  };
+
   const startNavigationFlow = (place: any) => {
     setSelectedPlace(place);
     setIsRoutingMode(true);
+    
     if (!origin) {
-      setIsPickingOrigin(true);
+      // 🟢 TRIGGER GPS INSTEAD OF INSTANT MANUAL PIN
+      requestGpsLocation(place);
     } else {
       handleRouteRequest(place, travelMode); 
     }
   };
 
-  const handleRouteRequest = async (place: any, mode: TravelMode) => {
-    if (!map.current || !origin) return;
+  const handleRouteRequest = async (place: any, mode: TravelMode, overrideStart?: number[]) => {
+    // Use the override if provided by GPS, otherwise use the state origin
+    const startingCoords = overrideStart || origin?.coords;
+    
+    if (!map.current || !startingCoords) return;
     const currentMap = map.current;
 
     mockRoutes.forEach(route => {
@@ -286,8 +398,8 @@ export default function MapComponent() {
       if (currentMap.getLayer(`${revLayerId}-outline`)) currentMap.setLayoutProperty(`${revLayerId}-outline`, 'visibility', 'none');
     });
 
-    const startLon = origin.coords[0];
-    const startLat = origin.coords[1];
+    const startLon = startingCoords[0];
+    const startLat = startingCoords[1];
     const endLon = parseFloat(place.lon);
     const endLat = parseFloat(place.lat);
 
@@ -312,7 +424,7 @@ export default function MapComponent() {
     try {
       if (mode === 'transit') {
         // 🟢 1. WALKABLE FALLBACK
-        const directDistance = getDistanceMeters(origin.coords, [endLon, endLat]);
+        const directDistance = getDistanceMeters(startingCoords, [endLon, endLat]);
         
         if (directDistance < 600) { 
           setRouteInstructions([{ maneuver: { instruction: "Calculating walking route..." }, distance: 0 }]);
@@ -357,7 +469,7 @@ export default function MapComponent() {
 
         // 🟢 2. JEEPNEY SEARCH ENGINE
         setRouteInstructions([{ maneuver: { instruction: "Calculating optimal Jeepney route..." }, distance: 0 }]);
-        const transitPlan = findBestJeepneyRoute(origin.coords, [endLon, endLat]);
+        const transitPlan = findBestJeepneyRoute(startingCoords, [endLon, endLat]);
 
         if (!transitPlan) {
           setRouteInstructions([{ maneuver: { instruction: "Destination is too far from any Jeepney route." }, distance: 0 }]);
@@ -380,7 +492,7 @@ export default function MapComponent() {
 
             // Re-calculate the exact pickup/dropoff by snapping the user's pins
             // directly onto the actual STREET curves, not the mathematical straight lines!
-            const preciseBoardPt = turf.nearestPointOnLine(highResLine, turf.point(origin.coords));
+            const preciseBoardPt = turf.nearestPointOnLine(highResLine, turf.point(startingCoords));
             const preciseDropPt = turf.nearestPointOnLine(highResLine, turf.point([endLon, endLat]));
 
             finalBoardCoords = preciseBoardPt.geometry.coordinates;
@@ -394,7 +506,7 @@ export default function MapComponent() {
         }
 
         // 🟢 4. FETCH PRECISE WALKING ROUTES
-        const walk1Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${origin.coords[0]},${origin.coords[1]};${finalBoardCoords[0]},${finalBoardCoords[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+        const walk1Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${startingCoords[0]},${startingCoords[1]};${finalBoardCoords[0]},${finalBoardCoords[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
         const walk2Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${finalDropCoords[0]},${finalDropCoords[1]};${endLon},${endLat}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
 
         const [walk1Res, walk2Res] = await Promise.all([fetch(walk1Url), fetch(walk2Url)]);
@@ -617,20 +729,52 @@ export default function MapComponent() {
     const currentMap = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/streets-v12",
-      center: USER_START_LOCATION,
+      center: DEFAULT_CITY_CENTER,
       zoom: 14,
     });
     map.current = currentMap;
 
+    const startEl = document.createElement("div");
+      startEl.style.cssText = "width:34px;height:34px;background:#3b82f6;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(0,0,0,0.3);cursor:pointer;";
+      startEl.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+      
+      startMarkerRef.current = new mapboxgl.Marker({ element: startEl }).setLngLat(DEFAULT_CITY_CENTER as [number, number]).addTo(currentMap);
+
     const updateMarkerVisibility = () => {
       const zoom = currentMap.getZoom();
+      
+      // ==========================================
+      // 🟢 MASTER ZOOM CONTROLS
+      // Higher number = You must zoom in closer to see them!
+      // ==========================================
+      const SHOW_HOSPITALS = 14.0;       // Priority 1 (Currently pops up at city/district view)
+      const SHOW_SCHOOLS_BANKS = 16.5;   // Priority 2 (Currently pops up at deep neighborhood view)
+      const SHOW_EVERYTHING = 17.5;      // Priority 3 (Minor places - only pops up at extreme street view!)
+
       markers.current.forEach((marker) => {
         const el = marker.getElement();
+        
+        // Hide everything if navigating
+        if (isRoutingModeRef.current) {
+          el.style.display = "none";
+          return; 
+        }
+
         const priority = parseInt(el.dataset.priority || "3");
-        if (priority === 4 || zoom < 13.0) el.style.display = "none";
-        else if (zoom < 14.5 && priority > 1) el.style.display = "none";
-        else if (zoom < 15.5 && priority > 2) el.style.display = "none";
-        else el.style.display = "flex";
+
+        // Execute visibility based on your master controls
+        if (zoom < SHOW_HOSPITALS) {
+          el.style.display = "none"; // Zoomed out too far: Hide all
+        } 
+        else if (priority > 1 && zoom < SHOW_SCHOOLS_BANKS) {
+          el.style.display = "none"; // Hide Priority 2 & 3
+        } 
+        else if (priority > 2 && zoom < SHOW_EVERYTHING) {
+          el.style.display = "none"; // Hide Priority 3
+        } 
+        else {
+          el.style.display = "flex"; // Show it!
+        }
       });
     };
 
@@ -638,12 +782,6 @@ export default function MapComponent() {
       mockRoutes.forEach((jeepney) => {
         void drawJeepneyRouteLine(jeepney);
       });
-
-      const startEl = document.createElement("div");
-      startEl.style.cssText = "width:34px;height:34px;background:#3b82f6;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(0,0,0,0.3);cursor:pointer;";
-      startEl.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
-      
-      startMarkerRef.current = new mapboxgl.Marker({ element: startEl }).setLngLat(USER_START_LOCATION).addTo(currentMap);
 
       try {
         const res = await fetch("/api/amenities");
@@ -678,18 +816,30 @@ export default function MapComponent() {
     });
 
     currentMap.on("click", (e) => {
-      if (isPickingOriginRef.current) {
-        setOrigin({
-          name: `Dropped Pin (${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)})`,
-          coords: [e.lngLat.lng, e.lngLat.lat]
-        });
-        setIsPickingOrigin(false); 
-        
-        if (startMarkerRef.current) startMarkerRef.current.setLngLat(e.lngLat);
-      } else {
-        USER_START_LOCATION[0] = e.lngLat.lng;
-        USER_START_LOCATION[1] = e.lngLat.lat;
-        if (startMarkerRef.current) startMarkerRef.current.setLngLat(e.lngLat);
+      // 🟢 THE FIX: Only allow clicking the map to move the pin IF the blue banner is active!
+      if (!isPickingOriginRef.current) return; 
+
+      const newCoords = [e.lngLat.lng, e.lngLat.lat];
+      
+      setOrigin({
+        name: `Dropped Pin (${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)})`,
+        coords: newCoords
+      });
+      
+      setIsPickingOrigin(false); 
+      
+      if (startMarkerRef.current) {
+        startMarkerRef.current.setLngLat(e.lngLat);
+      }
+
+      if (isRoutingModeRef.current) {
+        setTimeout(() => {
+          const destPlace = document.getElementById("popup-portal-root")?.children.length 
+            ? (window as any).currentActivePlace 
+            : null; 
+            
+          // The state dependency array will catch the 'origin' change and trigger routing.
+        }, 100);
       }
     });
 
@@ -701,7 +851,7 @@ export default function MapComponent() {
       
       <Sidebar 
         places={filteredPlaces} 
-        userLocation={USER_START_LOCATION} 
+        userLocation={DEFAULT_CITY_CENTER} 
         origin={origin}
         destination={selectedPlace}
         mode={travelMode}
@@ -763,7 +913,7 @@ export default function MapComponent() {
         </div>
       )}
 
-      <div className="relative flex-1 h-full ml-80">
+      <div className="relative flex-1 h-full ml-96">
         
         <div className="absolute top-4 left-4 right-4 z-10 flex gap-3 pointer-events-none">
           <div className="pointer-events-auto bg-white rounded-full shadow-md px-4 py-2 flex items-center w-64 md:w-80">
