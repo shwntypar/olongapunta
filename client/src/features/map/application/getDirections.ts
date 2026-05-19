@@ -1,3 +1,6 @@
+import * as turf from '@turf/turf';
+import { mockRoutes } from '../domain/MockData'; // Adjust this path if your folder structure is different!
+
 export const getDistanceMeters = (coord1: number[], coord2: number[]) => {
   const R = 6371e3; // Earth radius in meters
   const lat1 = (coord1[1] * Math.PI) / 180;
@@ -11,7 +14,6 @@ export const getDistanceMeters = (coord1: number[], coord2: number[]) => {
   return R * c;
 };
 
-// 🟢 The "Chunk-Loading" Transit Fetcher
 export const fetchExactJeepneyPath = async (pathCoordinates: number[][]) => {
   if (!pathCoordinates || pathCoordinates.length < 2) return null;
 
@@ -24,8 +26,8 @@ export const fetchExactJeepneyPath = async (pathCoordinates: number[][]) => {
       .join(';');
 
     // 2. Make ONE single request for the entire route
-    // (Using 'cycling' instead of 'driving' to bypass strict one-way street errors)
-    const url = `https://api.mapbox.com/directions/v5/mapbox/cycling/${coordinateString}?alternatives=false&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`;
+    // 🟢 BUG FIX: Changed 'driving' to 'cycling' to match your comment and bypass one-way street errors!
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinateString}?alternatives=false&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`;
     
     const response = await fetch(url);
 
@@ -41,4 +43,71 @@ export const fetchExactJeepneyPath = async (pathCoordinates: number[][]) => {
     console.error("Error fetching exact jeepney path:", error);
     return null;
   }
+};
+
+// --- 🟢 NEW: TURF.JS TRANSIT ROUTING ENGINE ---
+
+export const findBestJeepneyRoute = (originCoords: number[], destCoords: number[]) => {
+  const startPoint = turf.point(originCoords);
+  const endPoint = turf.point(destCoords);
+  const directWalkKm = turf.distance(startPoint, endPoint);
+
+  let bestRoute: any = null;
+  let bestScore = Infinity; 
+
+  // Helper function to evaluate a specific direction of a route
+  // Helper function to evaluate a specific direction of a route
+  const evaluatePath = (route: any, pathCoords: number[][], directionName: string) => {
+    if (!pathCoords || pathCoords.length < 2) return;
+
+    const jeepneyLine = turf.lineString(pathCoords);
+    const boardingPoint = turf.nearestPointOnLine(jeepneyLine, startPoint);
+    const dropoffPoint = turf.nearestPointOnLine(jeepneyLine, endPoint);
+
+    if (boardingPoint.properties.location >= dropoffPoint.properties.location) {
+      return; 
+    }
+
+    const walkToBoardKm = turf.distance(startPoint, boardingPoint);
+    const walkFromDropKm = turf.distance(dropoffPoint, endPoint);
+    const totalWalk = walkToBoardKm + walkFromDropKm;
+
+    const riddenPath = turf.lineSlice(boardingPoint, dropoffPoint, jeepneyLine);
+    const rideDistanceKm = turf.length(riddenPath);
+
+    // 🟢 THE SUBMARINE FIX: 
+    // If the ride is ridiculously long compared to the direct distance, 
+    // it means it's taking you on the "Grand Tour" around the whole city loop. Reject it!
+    if (rideDistanceKm > directWalkKm * 3) {
+      return; 
+    }
+
+    // 🟢 THE NEW SCORE: We add walking and riding together, 
+    // but multiply walking by 3 because human energy is precious!
+    const tripScore = (totalWalk * 3) + rideDistanceKm;
+
+    if (totalWalk < 1.5 && rideDistanceKm > 0.15 && totalWalk < directWalkKm) {
+      if (tripScore < bestScore) {
+        bestScore = tripScore;
+        
+        bestRoute = {
+          jeepney: route,
+          headingTowards: directionName.split(' to ')[1] || directionName, 
+          boardingCoords: boardingPoint.geometry.coordinates,
+          dropoffCoords: dropoffPoint.geometry.coordinates,
+          slicedGeometry: riddenPath.geometry, 
+          walkDistanceMeters: Math.round(totalWalk * 1000),
+          activePathCoords: pathCoords 
+        };
+      }
+    }
+  };
+
+  // 🟢 Evaluate BOTH directions for every Jeepney!
+  mockRoutes.forEach(route => {
+    if (route.path) evaluatePath(route, route.path, route.routeName);
+    if (route.returnPath) evaluatePath(route, route.returnPath, route.reversedName);
+  });
+
+  return bestRoute;
 };

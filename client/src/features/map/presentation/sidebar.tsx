@@ -1,9 +1,20 @@
 "use client";
 import React, { useState } from 'react';
 import { getDistanceMeters } from '../application/getDirections';
-import { mockRoutes, JEEPNEY_COLOR_HEX } from '../domain/MockData';
+import { mockRoutes } from '../domain/MockData';
 
-export type TravelMode = 'walking' | 'cycling' | 'driving';
+export type TravelMode = 'walking' | 'cycling' | 'driving' | 'transit';
+
+const JEEPNEY_HEX_COLORS: Record<string, string> = {
+  YELLOW: '#ca8a04',
+  BLUE: '#2563eb',
+  RED: '#dc2626',
+  GREEN: '#16a34a',
+  ORANGE: '#FFA500',
+  CREAM: '#FFFDD0',
+  BROWN: '#964B00',
+  WHITE: '#e5e7eb'
+};
 
 interface SidebarProps {
   places: any[];
@@ -18,21 +29,20 @@ interface SidebarProps {
   onSelectPlace: (place: any) => void; 
   onStartNavigation: (place: any) => void; 
   routeInstructions?: any[];
-  // 🟢 NEW PROPS FOR ROUTE TOGGLING
   visibleRouteIds: string[];
-  onSelectRoute: (routeId: string) => void;
+  isolatedDirectionId: string | null; // 🟢 NEW: Tracks the exact Fwd/Rev direction
+  onSelectRoute: (routeId: string, directionId: string) => void; // 🟢 NEW: Passes both IDs
 }
 
 export default function Sidebar({ 
   places, userLocation, origin, destination, mode, 
   isRoutingMode, setMode, onSelectOriginMode, onCloseRouting, onSelectPlace, onStartNavigation,
   routeInstructions = [],
-  visibleRouteIds, onSelectRoute // 🟢 Retrieve them here
+  visibleRouteIds, isolatedDirectionId, onSelectRoute 
 }: SidebarProps) {
 
   const [activeTab, setActiveTab] = useState<'places' | 'routes'>('places');
 
-  // --- VIEW 1: ROUTING MODE (Google Maps Style) ---
   if (isRoutingMode) {
     return (
       <div className="absolute left-0 top-0 h-full w-80 bg-white shadow-2xl z-20 flex flex-col border-r border-gray-200">
@@ -45,13 +55,13 @@ export default function Sidebar({
 
         <div className="p-4 bg-gray-50 border-b border-gray-200 space-y-4">
           <div className="flex bg-gray-200 rounded-lg p-1">
-            {(['driving', 'cycling', 'walking'] as TravelMode[]).map((m) => (
+            {(['driving', 'cycling', 'transit', 'walking'] as TravelMode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
                 className={`flex-1 py-1.5 text-xs font-bold capitalize rounded transition-all ${mode === m ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                {m === 'cycling' ? 'Motorcycle' : m}
+                {m === 'cycling' ? 'Motorcycle' : m === 'transit' ? 'Jeepney' : m}
               </button>
             ))}
           </div>
@@ -102,7 +112,6 @@ export default function Sidebar({
     );
   }
 
-  // --- VIEW 2: EXPLORE MODE ---
   const placesWithDistance = places.map(place => {
     const startPos = origin ? origin.coords : userLocation || [0,0];
     const distance = getDistanceMeters(startPos, [parseFloat(place.lon), parseFloat(place.lat)]);
@@ -112,7 +121,7 @@ export default function Sidebar({
   return (
     <div className="absolute left-0 top-0 h-full w-80 bg-white shadow-2xl z-20 flex flex-col border-r border-gray-200">
       <div className="bg-blue-600 text-white shadow-md pt-5 px-5">
-        <h2 className="font-bold text-xl">Explore Olongapo</h2>
+        <h2 className="font-bold text-xl">OlongaPunta</h2>
         <div className="flex mt-4">
           <button onClick={() => setActiveTab('places')} className={`flex-1 pb-3 text-sm font-bold text-center border-b-4 transition-colors ${activeTab === 'places' ? 'border-white text-white' : 'border-blue-500 text-blue-200 hover:text-white'}`}>Places</button>
           <button onClick={() => setActiveTab('routes')} className={`flex-1 pb-3 text-sm font-bold text-center border-b-4 transition-colors ${activeTab === 'routes' ? 'border-white text-white' : 'border-blue-500 text-blue-200 hover:text-white'}`}>Jeepney Routes</button>
@@ -129,45 +138,44 @@ export default function Sidebar({
           </div>
         ))}
 
-        {/* 🟢 ROUTES TAB: NOW CLICKABLE WITH DIMMING EFFECT */}
-        {activeTab === 'routes' && mockRoutes.map((route) => {
-          const routeHex = JEEPNEY_COLOR_HEX[route.colorCode];
-          const isLightColor = route.colorCode === 'CREAM' || route.colorCode === 'WHITE';
-          const isVisible = visibleRouteIds.includes(route.id); // Check if this specific route is active
+        {/* ROUTES TAB */}
+        {activeTab === 'routes' && mockRoutes.flatMap((route) => {
+          const routeHex = JEEPNEY_HEX_COLORS[route.colorCode] || '#000000';
 
-          return (
-            <div 
-              key={route.id} 
-              onClick={() => onSelectRoute(route.id)} // 🟢 Click to toggle!
-              className={`border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all cursor-pointer ${isVisible ? 'bg-white' : 'bg-gray-100 opacity-60 grayscale'}`}
-            >
+          const directions = [
+            { title: route.routeName, id: `${route.id}-fwd` },
+            { title: route.reversedName, id: `${route.id}-rev` }
+          ];
+
+          return directions.map((dir) => {
+            // 🟢 UI Logic: Highlight ONLY the exact clicked direction
+            const isActive = isolatedDirectionId 
+              ? isolatedDirectionId === dir.id 
+              : visibleRouteIds.includes(route.id);
+
+            return (
               <div 
-                className={`px-4 py-2 font-black tracking-wider text-xs flex justify-between items-center`}
-                style={{ backgroundColor: routeHex, color: isLightColor ? '#000000' : '#FFFFFF', borderBottom: '1px solid rgba(0,0,0,0.1)' }}
+                key={dir.id}
+                onClick={() => onSelectRoute(route.id, dir.id)} // 🟢 Passes BOTH IDs to Map
+                className={`flex items-center justify-between mb-2 p-3 rounded-lg shadow-sm cursor-pointer transition-all border border-gray-200 ${isActive ? 'bg-white hover:bg-gray-50' : 'bg-gray-100 opacity-60 grayscale'}`}
               >
-                <div className="flex items-center gap-2">
-                  {/* Eye Icon changes if hidden */}
-                  {isVisible ? (
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                  ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg>
-                  )}
-                  <span>{route.colorCode} JEEP</span>
-                </div>
-                <span className="opacity-80">₱{route.baseFare.toFixed(2)}</span>
-              </div>
-              
-              <div className="p-4">
-                <h3 className="font-bold text-sm text-gray-800 leading-tight mb-2">{route.routeName}</h3>
-                <div className="flex gap-2 mt-3">
-                  <div className="flex items-center text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded border border-gray-300">
-                    <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-                    {isVisible ? 'Visible on Map' : 'Hidden'}
+                <div className="flex items-center gap-4">
+                  <div className="w-1.5 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: routeHex }}></div>
+                  <div>
+                    <h3 className="font-bold text-sm text-gray-900 leading-tight">
+                      {route.routeCode} | {dir.title}
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {route.routeCode} · <span className="capitalize">{route.colorCode.toLowerCase()}</span> Jeepney
+                    </p>
                   </div>
                 </div>
+                <svg className="w-4 h-4 text-gray-400 flex-shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+                </svg>
               </div>
-            </div>
-          )
+            );
+          });
         })}
 
       </div>
