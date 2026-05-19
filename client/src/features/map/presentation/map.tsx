@@ -311,8 +311,7 @@ export default function MapComponent() {
 
     try {
       if (mode === 'transit') {
-        // 🟢 1. THE STRICT WALKABLE FALLBACK
-        // If the entire trip is less than 600 meters, don't even bother with a Jeepney!
+        // 🟢 1. WALKABLE FALLBACK
         const directDistance = getDistanceMeters(origin.coords, [endLon, endLat]);
         
         if (directDistance < 600) { 
@@ -353,10 +352,10 @@ export default function MapComponent() {
           walkData.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
           currentMap.fitBounds(bounds, { padding: 80, duration: 1200 });
 
-          return; // STOP! Do not search for a Jeepney.
+          return; 
         }
 
-        // --- JEEPNEY SEARCH LOGIC ---
+        // 🟢 2. JEEPNEY SEARCH ENGINE
         setRouteInstructions([{ maneuver: { instruction: "Calculating optimal Jeepney route..." }, distance: 0 }]);
         const transitPlan = findBestJeepneyRoute(origin.coords, [endLon, endLat]);
 
@@ -365,30 +364,42 @@ export default function MapComponent() {
           return;
         }
 
-        const walk1Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${origin.coords[0]},${origin.coords[1]};${transitPlan.boardingCoords[0]},${transitPlan.boardingCoords[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
-        const walk2Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${transitPlan.dropoffCoords[0]},${transitPlan.dropoffCoords[1]};${endLon},${endLat}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+        // ==========================================
+        // 🟢 3. THE ULTIMATE HIGH-RES RE-CALCULATION
+        // ==========================================
+        let rideGeometry = transitPlan.slicedGeometry;
+        let finalBoardCoords = transitPlan.boardingCoords;
+        let finalDropCoords = transitPlan.dropoffCoords;
+
+        try {
+          // Ask Mapbox for the perfect, curved road connecting your raw MockData points
+          const fullJeepneyData = await fetchExactJeepneyPath(transitPlan.activePathCoords);
+          
+          if (fullJeepneyData?.routes?.[0]?.geometry) {
+            const highResLine = turf.lineString(fullJeepneyData.routes[0].geometry.coordinates);
+
+            // Re-calculate the exact pickup/dropoff by snapping the user's pins
+            // directly onto the actual STREET curves, not the mathematical straight lines!
+            const preciseBoardPt = turf.nearestPointOnLine(highResLine, turf.point(origin.coords));
+            const preciseDropPt = turf.nearestPointOnLine(highResLine, turf.point([endLon, endLat]));
+
+            finalBoardCoords = preciseBoardPt.geometry.coordinates;
+            finalDropCoords = preciseDropPt.geometry.coordinates;
+
+            // Cleanly slice the beautifully curved road
+            rideGeometry = turf.lineSlice(preciseBoardPt, preciseDropPt, highResLine).geometry;
+          }
+        } catch (error) {
+          console.warn("High-res recalculation failed, falling back to low-poly geometry.");
+        }
+
+        // 🟢 4. FETCH PRECISE WALKING ROUTES
+        const walk1Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${origin.coords[0]},${origin.coords[1]};${finalBoardCoords[0]},${finalBoardCoords[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+        const walk2Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${finalDropCoords[0]},${finalDropCoords[1]};${endLon},${endLat}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
 
         const [walk1Res, walk2Res] = await Promise.all([fetch(walk1Url), fetch(walk2Url)]);
         const walk1Data = await walk1Res.json();
         const walk2Data = await walk2Res.json();
-
-        // ==========================================
-        // 🟢 2. THE BREADCRUMB CURVE FIX
-        // ==========================================
-        const rawSliceCoords = transitPlan.slicedGeometry.coordinates as number[][];
-        const sampledCoords = sampleCoordinates(rawSliceCoords, 24); // Keep it under Mapbox's 25 limit!
-
-        let rideGeometry = transitPlan.slicedGeometry; // Fallback to raw straight lines if Mapbox fails
-        
-        try {
-          // We feed Mapbox the breadcrumbs of ONLY the ride segment to curve it perfectly
-          const jeepneyRideData = await fetchExactJeepneyPath(sampledCoords);
-          if (jeepneyRideData?.routes?.[0]?.geometry) {
-            rideGeometry = jeepneyRideData.routes[0].geometry;
-          }
-        } catch (e) {
-          console.warn("Breadcrumb curve failed, using raw geometry.");
-        }
 
         const walkToJeepneySteps = walk1Data.routes[0].legs[0].steps;
         const walkToDestinationSteps = walk2Data.routes[0].legs[0].steps;
