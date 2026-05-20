@@ -383,6 +383,8 @@ export default function MapComponent() {
 
   const handleRouteRequest = async (place: any, mode: TravelMode, overrideStart?: number[]) => {
     // Use the override if provided by GPS, otherwise use the state origin
+
+    const startTime = performance.now(); // ⏱️ Start timer
     const startingCoords = overrideStart || origin?.coords;
     
     if (!map.current || !startingCoords) return;
@@ -642,6 +644,11 @@ export default function MapComponent() {
       const bounds = new mapboxgl.LngLatBounds();
       allCoordinatesToFrame.forEach((c: any) => bounds.extend(c));
       currentMap.fitBounds(bounds, { padding: 80, duration: 1200 });
+
+      const endTime = performance.now(); // ⏱️ Stop timer
+      const duration = (endTime - startTime).toFixed(2);
+
+      console.log(`Navigation Routing Engine took ${duration}ms for ${mode} mode.`);
 
     } catch (error) { 
       console.error("Routing Error:", error); 
