@@ -12,7 +12,7 @@ const page = () => {
       </div>
       <MapComponent />
     </div>
-  );
+  );  
 };
 
 export default page;

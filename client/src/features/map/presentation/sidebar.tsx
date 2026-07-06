@@ -1,258 +1,548 @@
 "use client";
-import React, { useState } from 'react';
-import { getDistanceMeters } from '../application/getDirections';
-import { mockRoutes } from '../domain/MockData';
 
-export type TravelMode = 'walking' | 'cycling' | 'driving' | 'transit';
+import React, { useState } from "react";
+import { mockRoutes } from "../domain/MockData";
 
-const JEEPNEY_HEX_COLORS: Record<string, string> = {
-  YELLOW: '#ca8a04',
-  BLUE: '#2563eb',
-  RED: '#dc2626',
-  GREEN: '#16a34a',
-  ORANGE: '#FFA500',
-  CREAM: '#fef3c7', // Adjusted for better visibility
-  BROWN: '#964B00',
-  WHITE: '#f3f4f6'  // Adjusted for better visibility
-};
+export type TravelMode = "driving" | "walking" | "cycling" | "transit";
 
 interface SidebarProps {
   places: any[];
-  userLocation: number[] | null;
+  userLocation: number[];
   origin: { name: string; coords: number[] } | null;
   destination: any | null;
   mode: TravelMode;
   isRoutingMode: boolean;
   setMode: (mode: TravelMode) => void;
-  onSelectOriginMode: () => void; 
-  onCloseRouting: () => void;
-  onSelectPlace: (place: any) => void; 
-  onStartNavigation: (place: any) => void; 
-  routeInstructions?: any[];
+  routeInstructions: any[];
   visibleRouteIds: string[];
   isolatedDirectionId: string | null;
-  onSelectRoute: (routeId: string, directionId: string) => void; 
+  onSelectOriginMode: () => void;
+  onSelectRoute: (routeId: string, directionId: string) => void;
+  onCloseRouting: () => void;
+  onSelectPlace: (place: any) => void;
+  onStartNavigation: (place: any) => void;
+
+  // 🚗 Alternative Paths Props (Driving, Walking, Motor)
+  alternativeRoutes?: any[];
+  activeRouteIdx?: number;
+  setActiveRouteIdx?: (idx: number) => void;
+
+  // 🚐 Transit Candidate Props (Alternatives)
+  transitCandidates?: any[];
+  activeTransitIdx?: number;
+  setActiveTransitIdx?: (idx: number) => void;
 }
 
-export default function Sidebar({ 
-  places, userLocation, origin, destination, mode, 
-  isRoutingMode, setMode, onSelectOriginMode, onCloseRouting, onSelectPlace, onStartNavigation,
-  routeInstructions = [],
-  visibleRouteIds, isolatedDirectionId, onSelectRoute 
+export default function Sidebar({
+  places,
+  origin,
+  destination,
+  mode,
+  isRoutingMode,
+  setMode,
+  routeInstructions,
+  visibleRouteIds,
+  isolatedDirectionId,
+  onSelectOriginMode,
+  onSelectRoute,
+  onCloseRouting,
+  onSelectPlace,
+  onStartNavigation,
+
+  // Alternative paths (Walking, Motor, Driving)
+  alternativeRoutes = [],
+  activeRouteIdx = 0,
+  setActiveRouteIdx,
+
+  // Transit options list
+  transitCandidates = [],
+  activeTransitIdx = 0,
+  setActiveTransitIdx,
 }: SidebarProps) {
+  const [activeTab, setActiveTab] = useState<"explore" | "routes">("explore");
 
-  const [activeTab, setActiveTab] = useState<'places' | 'routes'>('routes');
+  // Get hex color for display mapping
+  const getJeepneyHexColor = (colorName: string) => {
+    const colors: Record<string, string> = {
+      YELLOW: "#eab308",
+      BLUE: "#2563eb",
+      RED: "#dc2626",
+      GREEN: "#16a34a",
+      ORANGE: "#f97316",
+      CREAM: "#fef08a",
+      BROWN: "#78350f",
+      WHITE: "#94a3b8",
+    };
+    return colors[colorName] || "#64748b";
+  };
 
-  // ==========================================
-  // 🟢 ROUTING / DIRECTIONS MODE
-  // ==========================================
-  if (isRoutingMode) {
-    return (
-      <div className="absolute left-0 top-0 h-full w-96 bg-white shadow-[4px_0_24px_rgba(0,0,0,0.1)] z-20 flex flex-col border-r border-gray-200 transition-all">
-        {/* Routing Header */}
-        <div className="p-5 bg-gradient-to-r from-blue-700 to-blue-600 text-white flex items-center gap-4 shadow-md">
-          <button onClick={onCloseRouting} className="p-2 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-sm transition-all" title="Cancel Navigation">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-          </button>
-          <h2 className="font-extrabold text-xl tracking-tight">Directions</h2>
+  // Estimate Fare for Jeepney instructions
+  const estimateFare = (instructionText: string) => {
+    const match = instructionText.match(/Ride the (J-\d+)/);
+    if (!match) return null;
+    const code = match[1];
+    const route = mockRoutes.find((r) => r.routeCode === code || r.routeName.includes(code));
+    if (route) {
+      return `₱${route.baseFare.toFixed(2)}`;
+    }
+    return "₱13.00";
+  };
+
+  // Extract driving metrics from alternativeRoutes
+  const activeDriveInfo = alternativeRoutes[activeRouteIdx]
+    ? {
+        durationMin: Math.round(alternativeRoutes[activeRouteIdx].duration / 60),
+        distanceKm: (alternativeRoutes[activeRouteIdx].distance / 1000).toFixed(1),
+        summary: alternativeRoutes[activeRouteIdx].summary || "Route",
+      }
+    : null;
+
+  // Extract transit metrics from activeTransitCandidate
+  const activeTransitPlan = transitCandidates[activeTransitIdx];
+  const transitFareSum = activeTransitPlan
+    ? activeTransitPlan.transfer
+      ? activeTransitPlan.jeepney.baseFare + activeTransitPlan.transfer.jeepney.baseFare
+      : activeTransitPlan.jeepney.baseFare
+    : 13.0;
+
+  return (
+    <div className="absolute top-0 left-0 w-96 h-full bg-slate-900/95 backdrop-blur-md text-white border-r border-slate-800 flex flex-col z-20 shadow-2xl transition-all duration-300">
+      
+      {/* App Header */}
+      <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-tight">
+            OlongaPunta
+          </h1>
+          <p className="text-xs text-slate-400 font-semibold tracking-widest uppercase mt-0.5">
+            Transit & Explore
+          </p>
         </div>
+        <div className="bg-slate-800 px-3 py-1 rounded-full text-xs font-bold text-slate-300 border border-slate-700">
+          Olongapo City
+        </div>
+      </div>
 
-        {/* Travel Modes & Inputs */}
-        <div className="p-5 bg-gray-50 border-b border-gray-200 space-y-5">
-          {/* Segmented Control for Travel Modes */}
-          <div className="flex bg-gray-200/80 rounded-xl p-1.5 shadow-inner">
-            {(['driving', 'cycling', 'transit', 'walking'] as TravelMode[]).map((m) => (
+      {!isRoutingMode ? (
+        <>
+          {/* Tabs */}
+          <div className="flex border-b border-slate-800 bg-slate-950/40">
+            <button
+              onClick={() => setActiveTab("explore")}
+              className={`flex-1 py-4 text-sm font-bold tracking-wide transition-all border-b-2 ${
+                activeTab === "explore"
+                  ? "border-blue-500 text-blue-400 bg-slate-800/20"
+                  : "border-transparent text-slate-400 hover:text-white"
+              }`}
+            >
+              📍 Explore Places
+            </button>
+            <button
+              onClick={() => setActiveTab("routes")}
+              className={`flex-1 py-4 text-sm font-bold tracking-wide transition-all border-b-2 ${
+                activeTab === "routes"
+                  ? "border-purple-500 text-purple-400 bg-slate-800/20"
+                  : "border-transparent text-slate-400 hover:text-white"
+              }`}
+            >
+              🚐 Jeepney Routes
+            </button>
+          </div>
+
+          {/* Scrollable explore list */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800">
+            {activeTab === "explore" ? (
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
+                  Nearby Spots ({places.length})
+                </h3>
+                {places.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500 text-sm">
+                    No matching places found. Try typing a query.
+                  </div>
+                ) : (
+                  places.map((place) => (
+                    <div
+                      key={place.id}
+                      onClick={() => onSelectPlace(place)}
+                      className="group p-4 bg-slate-800/50 hover:bg-slate-800 border border-slate-800/80 hover:border-slate-700 rounded-xl cursor-pointer transition-all duration-200"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className="font-semibold text-slate-200 group-hover:text-white transition-colors">
+                            {place.name}
+                          </h4>
+                          <span className="inline-block text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 mt-1 bg-slate-700/60 text-slate-300 rounded-md">
+                            {place.type?.replace("_", " ")}
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onStartNavigation(place);
+                          }}
+                          className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg transition-colors flex items-center justify-center shadow-md shadow-blue-900/30"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
+                  Interactive Route Index
+                </h3>
+                {mockRoutes.map((route) => {
+                  const isFwdIsolated = isolatedDirectionId === `${route.id}-fwd`;
+                  const isRevIsolated = isolatedDirectionId === `${route.id}-rev`;
+                  const isRouteVisible = visibleRouteIds.includes(route.id);
+
+                  return (
+                    <div
+                      key={route.id}
+                      className={`p-4 rounded-xl border transition-all ${
+                        isRouteVisible
+                          ? "bg-slate-800/40 border-slate-700/60"
+                          : "bg-slate-950/20 border-slate-900 opacity-60 hover:opacity-85"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: getJeepneyHexColor(route.colorCode) }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                              {route.routeCode}
+                            </span>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">
+                              {route.colorCode}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 space-y-2">
+                        <button
+                          onClick={() => onSelectRoute(route.id, `${route.id}-fwd`)}
+                          className={`w-full text-left text-xs font-medium p-2 rounded-lg flex items-center justify-between transition-colors ${
+                            isFwdIsolated
+                              ? "bg-blue-600/90 text-white font-bold"
+                              : "bg-slate-800/70 hover:bg-slate-700 text-slate-300"
+                          }`}
+                        >
+                          <span className="truncate">➡️ {route.routeName}</span>
+                          <span className="text-[10px] opacity-70 ml-2">Show</span>
+                        </button>
+
+                        <button
+                          onClick={() => onSelectRoute(route.id, `${route.id}-rev`)}
+                          className={`w-full text-left text-xs font-medium p-2 rounded-lg flex items-center justify-between transition-colors ${
+                            isRevIsolated
+                              ? "bg-blue-600/90 text-white font-bold"
+                              : "bg-slate-800/70 hover:bg-slate-700 text-slate-300"
+                          }`}
+                        >
+                          <span className="truncate">⬅️ {route.reversedName}</span>
+                          <span className="text-[10px] opacity-70 ml-2">Show</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        /* Directions Routing Card */
+        <div className="flex-1 flex flex-col min-h-0 bg-slate-950/30">
+          
+          {/* Header destinations */}
+          <div className="p-5 border-b border-slate-800 flex items-start justify-between">
+            <div className="min-w-0 pr-4">
+              <span className="text-[10px] uppercase font-extrabold tracking-widest text-blue-400 bg-blue-900/30 border border-blue-800/50 px-2.5 py-0.5 rounded-full">
+                Directions
+              </span>
+              <div className="mt-2.5 space-y-1.5 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 w-12 flex-shrink-0">From:</span>
+                  <span className="font-semibold text-slate-200 truncate">
+                    {origin?.name || "Select starting point..."}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 w-12 flex-shrink-0">To:</span>
+                  <span className="font-semibold text-slate-200 truncate">
+                    {destination?.name || "Unnamed"}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={onCloseRouting}
+              className="p-1.5 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white rounded-lg transition-all"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* =============================================
+              ⚡ MULTI-MODAL COMPARISON METRICS CARD
+             ============================================= */}
+          <div className="p-4 bg-slate-900/80 border-b border-slate-800 grid grid-cols-2 gap-2">
+            
+            {/* Transit summary card */}
+            <div
+              onClick={() => setMode("transit")}
+              className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                mode === "transit"
+                  ? "bg-slate-800 border-blue-500 shadow-md"
+                  : "bg-slate-950/40 border-slate-850 hover:bg-slate-900"
+              }`}
+            >
+              <div className="flex items-center gap-1.5 text-xs font-black text-slate-400">
+                <span>🚐</span> Transit
+              </div>
+              {transitCandidates.length > 0 ? (
+                <div className="mt-1.5">
+                  <span className="text-lg font-black block text-slate-100 leading-none">
+                    {transitCandidates[activeTransitIdx] ? `${Math.round(transitCandidates[activeTransitIdx].score * 4)}m` : "Calculating..."}
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-extrabold mt-1 block">
+                    ₱{transitFareSum.toFixed(2)} • {activeTransitPlan?.transfer ? "1 Transfer" : "Direct"}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-[10px] text-slate-500 mt-2 block italic">Not available</span>
+              )}
+            </div>
+
+            {/* Driving summary card */}
+            <div
+              onClick={() => setMode("driving")}
+              className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                mode === "driving"
+                  ? "bg-slate-800 border-blue-500 shadow-md"
+                  : "bg-slate-950/40 border-slate-850 hover:bg-slate-900"
+              }`}
+            >
+              <div className="flex items-center gap-1.5 text-xs font-black text-slate-400">
+                <span>🚗</span> Driving
+              </div>
+              {activeDriveInfo ? (
+                <div className="mt-1.5">
+                  <span className="text-lg font-black block text-slate-100 leading-none">
+                    {activeDriveInfo.durationMin}m
+                  </span>
+                  <span className="text-[10px] text-blue-400 font-extrabold mt-1 block truncate">
+                    {activeDriveInfo.distanceKm} km • {activeDriveInfo.summary.substring(0, 10)}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-[10px] text-slate-500 mt-2 block italic">Not available</span>
+              )}
+            </div>
+
+          </div>
+
+          {/* Sub-mode selections (tab strip) */}
+          <div className="p-3 border-b border-slate-800 bg-slate-900/30 flex gap-1.5">
+            {(["driving", "walking", "cycling", "transit"] as TravelMode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
-                className={`flex-1 py-2 text-xs font-bold capitalize rounded-lg transition-all duration-200 ${mode === m ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${
+                  mode === m
+                    ? "bg-blue-600 text-white border-blue-500 shadow-md"
+                    : "bg-slate-800/50 text-slate-400 border-slate-850 hover:text-white hover:bg-slate-800"
+                }`}
               >
-                {m === 'cycling' ? 'Motorcycle' : m === 'transit' ? 'Jeepney' : m}
+                <span className="text-lg">
+                  {m === "driving" && "🚗"}
+                  {m === "walking" && "🚶"}
+                  {m === "cycling" && "🏍️"}
+                  {m === "transit" && "🚐"}
+                </span>
+                <span className="capitalize">{m === "cycling" ? "motor" : m}</span>
               </button>
             ))}
           </div>
 
-          <div className="space-y-4 relative">
-            <div className="absolute left-[17px] top-7 bottom-7 w-0.5 bg-gray-300 border-dashed border-l-2"></div>
-            
-            <div className="flex items-center gap-4 relative z-10">
-              <div className="w-4 h-4 rounded-full border-[4px] border-blue-500 bg-white flex-shrink-0 shadow-sm"></div>
-              <button 
-                onClick={onSelectOriginMode}
-                className={`flex-1 text-left px-4 py-3 rounded-xl border text-sm transition-all ${!origin ? 'border-blue-400 bg-blue-50 text-blue-700 font-bold hover:bg-blue-100 animate-pulse' : 'border-gray-200 bg-white shadow-sm font-medium text-gray-800'}`}
-              >
-                <div className="truncate">{origin ? origin.name : "Choose starting point..."}</div>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-4 relative z-10">
-              <div className="w-4 h-4 rounded-full bg-red-500 flex-shrink-0 shadow-sm flex items-center justify-center">
-                <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
-              </div>
-              <div className="flex-1 text-left px-4 py-3 rounded-xl border border-gray-200 bg-gray-100 text-sm text-gray-800 font-bold shadow-inner">
-                <div className="truncate">{destination ? destination.name : "Choose destination..."}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Directions List */}
-        <div className="flex-1 overflow-y-auto bg-white">
-          {!origin ? (
-            <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 p-8">
-              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4 border border-gray-100">
-                <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-              </div>
-              <p className="text-sm font-medium">Select a starting point on the map<br/>to calculate your route.</p>
-            </div>
-          ) : routeInstructions.length > 0 ? (
-            <ul className="divide-y divide-gray-100 pb-24">
-              {routeInstructions.map((step, idx) => (
-                <li key={idx} className="p-5 flex gap-4 items-start hover:bg-gray-50 transition-colors">
-                  <div className="mt-0.5 w-7 h-7 flex items-center justify-center bg-blue-100 text-blue-700 rounded-full flex-shrink-0 text-xs font-bold">{idx + 1}</div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-800 leading-snug">{step.maneuver.instruction}</p>
-                    {step.distance > 0 && <p className="text-xs text-gray-500 mt-1.5 font-semibold">{(step.distance).toFixed(0)} meters</p>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="p-8 text-center text-sm text-blue-600 font-bold animate-pulse">Calculating optimal route...</div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const placesWithDistance = places.map(place => {
-    const startPos = origin ? origin.coords : userLocation || [0,0];
-    const distance = getDistanceMeters(startPos, [parseFloat(place.lon), parseFloat(place.lat)]);
-    return { ...place, distance };
-  }).sort((a, b) => a.distance - b.distance);
-
-  // ==========================================
-  // 🟢 EXPLORE / DEFAULT MODE
-  // ==========================================
-  return (
-    <div className="absolute left-0 top-0 h-full w-96 bg-gray-50 shadow-[4px_0_24px_rgba(0,0,0,0.08)] z-20 flex flex-col border-r border-gray-200">
-      
-      {/* Sleek Gradient Header */}
-      <div className="bg-gradient-to-br from-blue-700 via-blue-600 to-blue-800 pt-7 px-5 shadow-md z-10 relative">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-blue-600">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
-          </div>
-          <div>
-            <h2 className="font-black text-white text-2xl tracking-tight leading-none">OlongaPunta</h2>
-            <p className="text-blue-200 text-xs font-semibold tracking-wide uppercase mt-1">Transit & Explore</p>
-          </div>
-        </div>
-
-        {/* Modern Segmented Tabs */}
-        <div className="flex bg-blue-900/40 p-1.5 rounded-t-2xl gap-1 backdrop-blur-sm">
-          <button 
-            onClick={() => setActiveTab('places')} 
-            className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all duration-300 ${activeTab === 'places' ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-100 hover:text-white hover:bg-white/10'}`}
-          >
-            Places
-          </button>
-          <button 
-            onClick={() => setActiveTab('routes')} 
-            className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all duration-300 ${activeTab === 'routes' ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-100 hover:text-white hover:bg-white/10'}`}
-          >
-            Jeepney Routes
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
-        
-        {/* PLACES TAB (Upgraded to match Jeepney cards) */}
-        {activeTab === 'places' && placesWithDistance.map((place, index) => (
-          <div key={place.id || index} className="group bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-0.5 cursor-pointer" onClick={() => onSelectPlace(place)}>
-            <div className="flex justify-between items-start mb-3">
-              <div className="pr-3">
-                <h3 className="font-extrabold text-gray-900 text-base leading-tight mb-1 group-hover:text-blue-600 transition-colors">{place.name}</h3>
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{place.type.replace('_', ' ')}</p>
-              </div>
-              {place.distance > 0 && (
-                <div className="bg-gray-100 text-gray-600 text-[10px] px-2 py-1 rounded-lg font-bold flex-shrink-0 border border-gray-200">
-                  {(place.distance / 1000).toFixed(1)} km
-                </div>
-              )}
-            </div>
-            <button onClick={(e) => { e.stopPropagation(); onStartNavigation(place); }} className="w-full py-2.5 rounded-xl font-bold bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all text-sm flex items-center justify-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-              Navigate Here
-            </button>
-          </div>
-        ))}
-
-        {/* ROUTES TAB */}
-        {activeTab === 'routes' && mockRoutes.flatMap((route) => {
-          const routeHex = JEEPNEY_HEX_COLORS[route.colorCode] || '#000000';
-
-          const directions = [
-            { title: route.routeName, id: `${route.id}-fwd`, label: 'Forward' },
-            { title: route.reversedName, id: `${route.id}-rev`, label: 'Return' }
-          ];
-
-          return directions.map((dir) => {
-            const isIsolated = isolatedDirectionId === dir.id;
-            const isActive = isolatedDirectionId ? isIsolated : visibleRouteIds.includes(route.id);
-            const isLightBadge = ['YELLOW', 'WHITE', 'CREAM'].includes(route.colorCode);
-            const badgeTextColor = isLightBadge ? 'text-gray-900' : 'text-white';
-
-            return (
-              <div 
-                key={dir.id}
-                onClick={() => onSelectRoute(route.id, dir.id)}
-                className={`group relative flex items-center p-3 rounded-2xl cursor-pointer transition-all duration-300 border-2 overflow-hidden ${
-                  isActive 
-                    ? 'bg-white border-transparent shadow-sm hover:shadow-lg hover:-translate-y-0.5' 
-                    : 'bg-white/50 border-transparent opacity-60 grayscale hover:grayscale-0 hover:opacity-100'
-                } ${isIsolated ? '!border-blue-500 shadow-blue-100' : ''}`}
-              >
-                <div 
-                  className={`flex flex-col items-center justify-center w-14 h-14 rounded-xl flex-shrink-0 shadow-inner font-black tracking-tighter ${badgeTextColor}`}
-                  style={{ backgroundColor: routeHex }}
-                >
-                  <span className="text-[10px] opacity-80 mb-0.5 uppercase tracking-widest font-bold">JEEP</span>
-                  <span className="text-lg leading-none">{route.routeCode}</span>
-                </div>
-
-                <div className="ml-4 flex-1 pr-6">
-                  <h3 className={`font-extrabold text-sm leading-snug mb-2 transition-colors ${isIsolated ? 'text-blue-700' : 'text-gray-900'}`}>
-                    {dir.title}
-                  </h3>
+          {/* =============================================
+              ⚡ JEEPNEY TRANSIT ALTERNATIVES SELECTOR
+             ============================================= */}
+          {mode === "transit" && transitCandidates.length > 1 && (
+            <div className="p-4 bg-slate-900/50 border-b border-slate-850">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-2.5">
+                Alternative Jeepney Transfers
+              </span>
+              <div className="space-y-1.5">
+                {transitCandidates.map((candidate, index) => {
+                  const isSelected = index === activeTransitIdx;
+                  const candidateFare = candidate.transfer
+                    ? candidate.jeepney.baseFare + candidate.transfer.jeepney.baseFare
+                    : candidate.jeepney.baseFare;
                   
-                  <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                    <span className="flex items-center gap-1.5 bg-gray-100 px-2 py-1 rounded-md border border-gray-200">
-                      <div className="w-2 h-2 rounded-full shadow-inner" style={{ backgroundColor: routeHex }}></div>
-                      {route.colorCode} Line
-                    </span>
-                    <span className={`px-2 py-1 rounded-md ${dir.label === 'Forward' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>
-                      {dir.label}
-                    </span>
-                  </div>
-                </div>
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => setActiveTransitIdx && setActiveTransitIdx(index)}
+                      className={`w-full text-left p-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-all ${
+                        isSelected
+                          ? "bg-blue-600/20 border-blue-500 text-blue-300 font-bold"
+                          : "bg-slate-950/30 border-slate-850 text-slate-300 hover:bg-slate-900"
+                      }`}
+                    >
+                      <span className="truncate flex items-center gap-1">
+                        <span>🚐</span> {candidate.jeepney.routeCode}
+                        {candidate.transfer && ` ➔ ${candidate.transfer.jeepney.routeCode}`}
+                      </span>
+                      <span>
+                        ₱{candidateFare.toFixed(2)} • {candidate.transfer ? "1 Transfer" : "Direct"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-                <div className={`absolute right-4 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
-                  isIsolated 
-                    ? 'bg-blue-600 text-white scale-110 shadow-md' 
-                    : 'bg-gray-100 text-gray-400 group-hover:bg-blue-100 group-hover:text-blue-600'
-                }`}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={isIsolated ? "3" : "2.5"} d={isIsolated ? "M5 13l4 4L19 7" : "M9 5l7 7-7 7"}></path>
-                  </svg>
+          {/* =============================================
+              ⚡ GENERAL ALTERNATIVE ROUTE SELECTOR (Driving, Walking, Motor)
+             ============================================= */}
+          {mode !== "transit" && alternativeRoutes.length > 1 && (
+            <div className="p-4 bg-slate-900/50 border-b border-slate-850">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-2.5">
+                Alternate Routes Available
+              </span>
+              <div className="space-y-1.5">
+                {alternativeRoutes.map((route, index) => {
+                  const duration = Math.round(route.duration / 60);
+                  const distance = (route.distance / 1000).toFixed(1);
+                  const isSelected = index === activeRouteIdx;
+
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => setActiveRouteIdx && setActiveRouteIdx(index)}
+                      className={`w-full text-left p-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-all ${
+                        isSelected
+                          ? "bg-blue-600/20 border-blue-500 text-blue-300 font-bold"
+                          : "bg-slate-950/30 border-slate-850 text-slate-300 hover:bg-slate-900"
+                      }`}
+                    >
+                      <span>
+                        Route {index + 1} ({route.summary || "Main Path"})
+                      </span>
+                      <span>
+                        {duration} mins • {distance} km
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Turn-by-Turn Instruction List */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-4 scrollbar-thin scrollbar-thumb-slate-800">
+            {routeInstructions.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-sm animate-pulse">
+                🔄 Mapping the best route...
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">
+                  Step-by-step Navigation
+                </h3>
+
+                <div className="relative border-l-2 border-slate-800 pl-5 ml-2.5 space-y-5">
+                  {routeInstructions.map((step, idx) => {
+                    const isBoard = step.maneuver.instruction.includes("BOARD:");
+                    const isAlight = step.maneuver.instruction.includes("ALIGHT:");
+                    const isTransfer = step.maneuver.instruction.includes("TRANSFER —");
+
+                    return (
+                      <div key={idx} className="relative group">
+                        <div
+                          className={`absolute -left-[27px] top-1.5 w-3 h-3 rounded-full border-2 transition-transform duration-200 group-hover:scale-125 ${
+                            isBoard
+                              ? "bg-yellow-500 border-slate-950"
+                              : isAlight
+                              ? "bg-red-500 border-slate-950"
+                              : isTransfer
+                              ? "bg-orange-500 border-slate-950"
+                              : "bg-slate-700 border-slate-950"
+                          }`}
+                        />
+
+                        <div className="bg-slate-900/60 hover:bg-slate-800/80 border border-slate-900/80 hover:border-slate-800 p-3 rounded-xl transition-all">
+                          <p className="text-sm font-medium text-slate-200">
+                            {step.maneuver.instruction}
+                          </p>
+
+                          {isBoard && (
+                            <div className="mt-2.5 flex items-center justify-between text-xs font-bold text-slate-400 bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
+                              <span>💳 Fare: {estimateFare(step.maneuver.instruction) || "₱13.00"}</span>
+                              <span className="px-2 py-0.5 rounded bg-yellow-950/60 text-yellow-500 border border-yellow-800/40">
+                                Boarding
+                              </span>
+                            </div>
+                          )}
+
+                          {isTransfer && (
+                            <div className="mt-2.5 flex items-center justify-between text-xs font-bold text-slate-400 bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
+                              <span className="text-orange-400">💳 Add'l Fare: {estimateFare(step.maneuver.instruction) || "₱13.00"}</span>
+                              <span className="px-2 py-0.5 rounded bg-orange-950/60 text-orange-500 border border-orange-800/40">
+                                🔄 Transfer
+                              </span>
+                            </div>
+                          )}
+
+                          {step.distance > 0 && (
+                            <span className="inline-block mt-2 text-[11px] font-black text-slate-500">
+                              {step.distance >= 1000
+                                ? `${(step.distance / 1000).toFixed(2)} km`
+                                : `${Math.round(step.distance)} m`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          });
-        })}
+            )}
+          </div>
 
-      </div>
+          {/* Fare Summary at the bottom */}
+          {mode === "transit" && routeInstructions.length > 0 && (
+            <div className="p-4 border-t border-slate-800 bg-slate-900/60 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                  Est. Total Fare
+                </span>
+                <span className="text-xl font-black text-emerald-400">
+                  ₱{transitFareSum.toFixed(2)}
+                </span>
+              </div>
+              <div className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-bold text-slate-300">
+                Ref: {activeTransitPlan?.transfer ? "1 Transfer" : "Direct Ride"}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
     </div>
   );
 }
