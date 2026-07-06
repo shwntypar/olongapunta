@@ -9,7 +9,7 @@ import * as turf from '@turf/turf';
 import {  
   fetchExactJeepneyPath,
   getDistanceMeters,
-  findBestJeepneyRoute
+  findTransitRouteCandidates  // ← NEW: alternate route list
 } from "../application/getDirections"; 
 import { mockRoutes } from "../domain/MockData";
 
@@ -31,12 +31,12 @@ const ICON_PATHS: Record<string, string> = {
 
 function getCategoryColor(type: string) {
   const t = (type || "").toLowerCase();
-  if (['hospital', 'clinic', 'pharmacy', 'dentist'].includes(t)) return '#ef4444'; // Red for Healthcare
-  if (['school', 'university', 'college'].includes(t)) return '#3b82f6'; // Blue for Education
-  if (['bank', 'atm'].includes(t)) return '#10b981'; // Green for Finance
-  if (['supermarket', 'mall', 'marketplace', 'restaurant', 'cafe', 'fast_food'].includes(t)) return '#f59e0b'; // Orange for Food/Retail
-  if (['townhall', 'police', 'fire_station', 'post_office'].includes(t)) return '#8b5cf6'; // Purple for Government
-  return '#64748b'; // Slate Gray for everything else
+  if (['hospital', 'clinic', 'pharmacy', 'dentist'].includes(t)) return '#ef4444';
+  if (['school', 'university', 'college'].includes(t)) return '#3b82f6';
+  if (['bank', 'atm'].includes(t)) return '#10b981';
+  if (['supermarket', 'mall', 'marketplace', 'restaurant', 'cafe', 'fast_food'].includes(t)) return '#f59e0b';
+  if (['townhall', 'police', 'fire_station', 'post_office'].includes(t)) return '#8b5cf6';
+  return '#64748b';
 }
 
 const JEEPNEY_HEX_COLORS: Record<string, string> = {
@@ -67,8 +67,6 @@ const AMENITY_PRIORITY: Record<string, number> = {
   "bicycle_parking": 4, "shelter": 4, "compressed_air": 4
 };
 
-// 🟢 NEW: Samples an array down to 24 points so Mapbox doesn't crash!
-
 function getPriority(type: string): number {
   return AMENITY_PRIORITY[type.toLowerCase()] || 3;
 }
@@ -84,18 +82,14 @@ function createCustomMarkerElement(type: string, priority: number) {
   el.style.cursor = "pointer";
   el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
 
-  // 1. Keep the size strictly uniform so the map stays clean
   const uniformSize = "24px";
   const uniformIconSize = 14;
-  
-  // 2. Fetch the dynamic color based on the amenity type!
   const bgColor = getCategoryColor(type); 
 
   el.style.width = uniformSize;
   el.style.height = uniformSize;
   el.style.backgroundColor = bgColor;
 
-  // 3. Fetch the specific SVG icon (or use a default map pin icon if not found)
   const path = ICON_PATHS[type.toLowerCase()] || "M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"; 
 
   el.innerHTML = `
@@ -103,7 +97,6 @@ function createCustomMarkerElement(type: string, priority: number) {
       <path d="${path}"></path>
     </svg>`;
     
-  // Keep the priority attached for the zoom-visibility logic!
   el.dataset.priority = priority.toString();
   
   return el;
@@ -112,17 +105,35 @@ function createCustomMarkerElement(type: string, priority: number) {
 function parseAmenities(data: any) {
   const nodes: Record<number, any> = {};
   data.elements.forEach((el: any) => { if (el.type === "node") nodes[el.id] = el; });
+
   return data.elements
-    .filter((el: any) => el.tags && (el.type === "node" || (el.type === "way" && el.nodes)))
+    .filter((el: any) => {
+      if (!el.tags) return false;
+      if (el.type === "way") {
+        const coords = (el.nodes || []).map((id: number) => nodes[id]).filter(Boolean);
+        return coords.length > 0;
+      }
+      return el.type === "node" && typeof el.lat === 'number' && typeof el.lon === 'number';
+    })
     .map((el: any) => {
-      let lat = el.lat, lon = el.lon;
+      let lat = el.lat;
+      let lon = el.lon;
+
       if (el.type === "way") {
         const coords = el.nodes.map((id: number) => nodes[id]).filter(Boolean);
         lat = coords.reduce((s: number, n: any) => s + n.lat, 0) / coords.length;
         lon = coords.reduce((s: number, n: any) => s + n.lon, 0) / coords.length;
       }
-      return { id: el.id, name: el.tags.name || "Unnamed", type: el.tags.amenity || el.tags.shop, lat, lon };
-    });
+
+      return { 
+        id: el.id, 
+        name: el.tags.name || "Unnamed", 
+        type: el.tags.amenity || el.tags.shop, 
+        lat, 
+        lon 
+      };
+    })
+    .filter((place: any) => !isNaN(place.lat) && !isNaN(place.lon));
 }
 
 export default function MapComponent() {
@@ -138,16 +149,27 @@ export default function MapComponent() {
   const [travelMode, setTravelMode] = useState<TravelMode>('driving'); 
   const [routeInstructions, setRouteInstructions] = useState<any[]>([]);
 
+  // 🚗 Alternatives Routing States (Shared by Driving, Walking, Motor)
+  const [alternativeRoutes, setAlternativeRoutes] = useState<any[]>([]);
+  const [activeRouteIdx, setActiveRouteIdx] = useState<number>(0);
+
+  // 🚐 Transit Alternatives States
+  const [transitCandidates, setTransitCandidates] = useState<any[]>([]);
+  const [activeTransitIdx, setActiveTransitIdx] = useState<number>(0);
+
   const [visibleRouteIds, setVisibleRouteIds] = useState<string[]>(mockRoutes.map(r => r.id));
-  const [isolatedDirectionId, setIsolatedDirectionId] = useState<string | null>(null); // 🟢 NEW STATE
+  const [isolatedDirectionId, setIsolatedDirectionId] = useState<string | null>(null);
 
   const startMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<mapboxgl.Marker[]>([]);
   const routeEndpointMarkers = useRef<mapboxgl.Marker[]>([]);
+
+  // Ref container to hold reference of mid-point alternative markers (pills) and alight markers
+  const altMidpointMarkers = useRef<mapboxgl.Marker[]>([]);
+  const transitMarkers = useRef<mapboxgl.Marker[]>([]);
   
-  // 🟢 NEW: A reference the map can instantly read to check if we are navigating
   const isRoutingModeRef = useRef(false);
   
   useEffect(() => {
@@ -156,38 +178,33 @@ export default function MapComponent() {
         (position) => {
           const liveCoords = [position.coords.longitude, position.coords.latitude];
           
-          // 1. Set the Origin state so the app knows where they are
           setOrigin({
             name: "My Current Location",
             coords: liveCoords
           });
 
-          // 2. Move the blue Start Marker to their location
           if (startMarkerRef.current) {
             startMarkerRef.current.setLngLat(liveCoords as any);
           }
 
-          // 3. Smoothly fly the camera to their location
           if (map.current) {
             map.current.flyTo({ center: liveCoords as any, zoom: 15, duration: 2000 });
           }
         },
         (error) => {
           console.warn("User denied GPS on load or signal failed:", error);
-          // If they deny it, the map just stays at the DEFAULT_CITY_CENTER
         },
         { enableHighAccuracy: true, timeout: 5000 }
       );
     }
   }, []);
 
-  // 🟢 NEW: Keep the reference perfectly synced with your state
+  // Recalculates route immediately on parameters change
   useEffect(() => {
     if (isRoutingMode && origin && selectedPlace) {
       handleRouteRequest(selectedPlace, travelMode, origin.coords);
     }
   }, [origin, travelMode, isRoutingMode, selectedPlace]); 
-  // Because 'origin' is in the array, changing your pin recalculates the route instantly!
   
   useEffect(() => {
     isPickingOriginRef.current = isPickingOrigin;
@@ -202,7 +219,7 @@ export default function MapComponent() {
   });
 
   const toggleColorGroup = (colorCode: string) => {
-    setIsolatedDirectionId(null); // Clear isolated view if active
+    setIsolatedDirectionId(null);
     routeEndpointMarkers.current.forEach(marker => marker.remove());
     routeEndpointMarkers.current = [];
 
@@ -217,7 +234,6 @@ export default function MapComponent() {
     }
   };
 
-  // 🟢 UPGRADED: ISOLATE INDIVIDUAL DIRECTION & DRAW ACCURATE ENDPOINTS
   const selectSingleRoute = (routeId: string, directionId: string) => {
     const currentMap = map.current;
 
@@ -225,20 +241,17 @@ export default function MapComponent() {
     routeEndpointMarkers.current = [];
 
     setIsolatedDirectionId(prevDir => {
-      // Toggle OFF if clicking the same specific direction twice
       if (prevDir === directionId) {
         setVisibleRouteIds(mockRoutes.map(r => r.id)); 
         return null;
       }
 
-      // Toggle ON
       setVisibleRouteIds([routeId]); 
       const selectedRoute = mockRoutes.find(r => r.id === routeId);
 
       if (selectedRoute && selectedRoute.path && currentMap) {
         const isFwd = directionId.endsWith('-fwd');
         
-        // 🟢 Accurately determine if we should plot markers on the Forward or Reverse path
         const activePath = isFwd 
           ? selectedRoute.path 
           : (selectedRoute.returnPath || [...selectedRoute.path].reverse());
@@ -264,11 +277,10 @@ export default function MapComponent() {
         }
       }
 
-      return directionId; // Save the newly isolated direction
+      return directionId;
     });
   };
 
-  // 🟢 UPGRADED: VISIBILITY & DYNAMIC OPACITY EFFECT
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
     const currentMap = map.current;
@@ -282,16 +294,13 @@ export default function MapComponent() {
       const isVisible = visibleRouteIds.includes(route.id);
       const visibilityValue = isVisible ? 'visible' : 'none';
 
-      // Set base layout visibility
       if (currentMap.getLayer(fwdLayerId)) currentMap.setLayoutProperty(fwdLayerId, 'visibility', visibilityValue);
       if (currentMap.getLayer(revLayerId)) currentMap.setLayoutProperty(revLayerId, 'visibility', visibilityValue);
       if (currentMap.getLayer(fwdOutlineId)) currentMap.setLayoutProperty(fwdOutlineId, 'visibility', visibilityValue);
       if (currentMap.getLayer(revOutlineId)) currentMap.setLayoutProperty(revOutlineId, 'visibility', visibilityValue);
 
-      // Handle Opacity based on Isolation
       if (isVisible) {
         if (isolatedDirectionId) {
-          // If a direction is clicked, dim the un-clicked path!
           const isFwdActive = isolatedDirectionId === `${route.id}-fwd`;
           const isRevActive = isolatedDirectionId === `${route.id}-rev`;
 
@@ -301,7 +310,6 @@ export default function MapComponent() {
           if (currentMap.getLayer(revLayerId)) currentMap.setPaintProperty(revLayerId, 'line-opacity', isRevActive ? 1.0 : 0.15);
           if (currentMap.getLayer(revOutlineId)) currentMap.setPaintProperty(revOutlineId, 'line-opacity', isRevActive ? 0.8 : 0.1);
         } else {
-          // Standard View (All full opacity)
           if (currentMap.getLayer(fwdLayerId)) currentMap.setPaintProperty(fwdLayerId, 'line-opacity', 1.0);
           if (currentMap.getLayer(fwdOutlineId)) currentMap.setPaintProperty(fwdOutlineId, 'line-opacity', 0.8);
           if (currentMap.getLayer(revLayerId)) currentMap.setPaintProperty(revLayerId, 'line-opacity', 1.0);
@@ -309,63 +317,32 @@ export default function MapComponent() {
         }
       }
     });
-  }, [visibleRouteIds, isolatedDirectionId]); // Re-run when either changes!
-
-  useEffect(() => {
-    if (isRoutingMode && origin && selectedPlace) {
-      handleRouteRequest(selectedPlace, travelMode);
-    }
-  }, [origin, travelMode, isRoutingMode, selectedPlace]);
+  }, [visibleRouteIds, isolatedDirectionId]);
 
   // ==========================================
-  // 🟢 NEW: LIVE GPS LOCATOR
+  // 🟢 LIVE GPS LOCATOR
   // ==========================================
-  const requestGpsLocation = (destinationPlace: any) => {
+  const requestGpsLocation = async (destinationPlace: any) => {
     if (!navigator.geolocation) {
-      // Browser doesn't support GPS at all -> Fallback to manual pin
-      console.warn("Geolocation is not supported by this browser.");
       setIsPickingOrigin(true);
       return;
     }
-
-    // Optional: You could add a temporary instruction here like "Locating you..."
-    setRouteInstructions([{ maneuver: { instruction: "📡 Acquiring GPS location..." }, distance: 0 }]);
-
+  
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        // SUCCESS! User allowed GPS.
-        const userCoords = [position.coords.longitude, position.coords.latitude];
+      async (position) => {
+        const coords: [number, number] = [position.coords.longitude, position.coords.latitude];
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coords[1]}&lon=${coords[0]}&format=json`);
+        const data = await res.json();
         
-        // Update the origin state
-        setOrigin({
-          name: "My Current Location",
-          coords: userCoords
-        });
-
-        // Snap the start marker to their real location
-        if (startMarkerRef.current) {
-          startMarkerRef.current.setLngLat(userCoords as any);
-        }
-
-        // We must call handleRouteRequest manually here because the state update 
-        // for `origin` might not be fast enough for the next line of code
-        handleRouteRequest(destinationPlace, travelMode, userCoords);
+        setOrigin({ name: data.display_name || "Current Location", coords });
+        if (startMarkerRef.current) startMarkerRef.current.setLngLat(coords as any);
+        handleRouteRequest(destinationPlace, travelMode, coords);
       },
       (error) => {
-        // FAILED OR DENIED! User blocked GPS or signal is weak.
-        console.warn("GPS Error:", error.message);
-        
-        // Clear the "Acquiring..." message
-        setRouteInstructions([]);
-        
-        // Fallback: Turn on the "Drop a Pin" mode automatically!
-        setIsPickingOrigin(true); 
+        console.warn("GPS failed, switching to manual pin mode:", error);
+        setIsPickingOrigin(true);
       },
-      { 
-        enableHighAccuracy: true, // Use the actual GPS chip if available
-        timeout: 10000,           // Give up after 10 seconds
-        maximumAge: 0             // Don't use a cached location
-      }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
@@ -373,23 +350,450 @@ export default function MapComponent() {
     setSelectedPlace(place);
     setIsRoutingMode(true);
     
-    if (!origin) {
-      // 🟢 TRIGGER GPS INSTEAD OF INSTANT MANUAL PIN
-      requestGpsLocation(place);
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  
+    if (isMobile) {
+       requestGpsLocation(place);
     } else {
-      handleRouteRequest(place, travelMode); 
+       setIsPickingOrigin(true); 
+       alert("Since you are on a PC, please click your starting point on the map.");
     }
   };
 
-  const handleRouteRequest = async (place: any, mode: TravelMode, overrideStart?: number[]) => {
-    // Use the override if provided by GPS, otherwise use the state origin
+  // Helper to remove custom floating markers and alight points
+  const clearCustomNavigationVisuals = () => {
+    altMidpointMarkers.current.forEach(m => m.remove());
+    altMidpointMarkers.current = [];
+    transitMarkers.current.forEach(m => m.remove());
+    transitMarkers.current = [];
+  };
 
-    const startTime = performance.now(); // ⏱️ Start timer
+  // =====================================================
+  // 🚗 DRAW MODAL ALTERNATIVE ROUTE GEOMETRIES & FLOATING PILLS
+  //    (Applies to Driving, Walking, and Motor modes)
+  // =====================================================
+  const drawAlternativeModalityRoutes = (routes: any[], activeIdx: number, activeColor: string) => {
+    if (!map.current) return;
+    const currentMap = map.current;
+
+    // 1. Clean up past alternative route layers/sources & midpoint markers
+    for (let i = 0; i < 5; i++) {
+      if (currentMap.getLayer(`alt-route-layer-${i}`)) currentMap.removeLayer(`alt-route-layer-${i}`);
+      if (currentMap.getSource(`alt-route-source-${i}`)) currentMap.removeSource(`alt-route-source-${i}`);
+    }
+    altMidpointMarkers.current.forEach(m => m.remove());
+    altMidpointMarkers.current = [];
+
+    if (!routes || routes.length === 0) return;
+
+    routes.forEach((route, idx) => {
+      const sourceId = `alt-route-source-${idx}`;
+      const layerId = `alt-route-layer-${idx}`;
+
+      if (idx === activeIdx) {
+        // Draw active path on "active-route"
+        const activeRouteGeoJSON = {
+          type: "FeatureCollection",
+          features: [{ type: "Feature", properties: {}, geometry: route.geometry }]
+        };
+        const source = currentMap.getSource("active-route") as mapboxgl.GeoJSONSource;
+        if (source) {
+          source.setData(activeRouteGeoJSON as any);
+          currentMap.setPaintProperty("active-route-layer", "line-color", activeColor);
+          currentMap.setPaintProperty("active-route-layer", "line-dasharray", travelMode === 'walking' ? [2, 2] : [1, 0]);
+          currentMap.setLayoutProperty("active-route-layer", "visibility", "visible");
+        } else {
+          currentMap.addSource("active-route", { type: "geojson", data: activeRouteGeoJSON as any });
+          currentMap.addLayer({
+            id: "active-route-layer",
+            type: "line",
+            source: "active-route",
+            layout: { "line-join": "round", "line-cap": "round", "visibility": "visible" },
+            paint: { 
+              "line-color": activeColor, 
+              "line-width": 6, 
+              "line-opacity": 0.9, 
+              "line-dasharray": travelMode === 'walking' ? [2, 2] : [1, 0] 
+            },
+          });
+        }
+      } else {
+        // Draw alternative path in light gray
+        currentMap.addSource(sourceId, {
+          type: "geojson",
+          data: { type: "Feature", properties: {}, geometry: route.geometry }
+        });
+
+        currentMap.addLayer({
+          id: layerId,
+          type: "line",
+          source: sourceId,
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: {
+            "line-color": "#94a3b8",
+            "line-width": 5,
+            "line-opacity": 0.5,
+            "line-dasharray": travelMode === 'walking' ? [2, 2] : [1, 0]
+          }
+        });
+
+        // Click line to activate alternative
+        (currentMap as any).on("click", layerId, (e: any) => {
+          if (e.originalEvent) e.originalEvent.stopPropagation();
+          setActiveRouteIdx(idx);
+        });
+
+        currentMap.on("mouseenter", layerId, () => {
+          currentMap.getCanvas().style.cursor = "pointer";
+        });
+        currentMap.on("mouseleave", layerId, () => {
+          currentMap.getCanvas().style.cursor = "";
+        });
+
+        // 📍 Calculate mid-point of the alternative route to add floating label displaying distance/duration
+        try {
+          const line = turf.lineString(route.geometry.coordinates);
+          const totalLength = turf.length(line);
+          const midPt = turf.along(line, totalLength / 2).geometry.coordinates;
+
+          const durationMin = Math.round(route.duration / 60);
+          const distanceKm = (route.distance / 1000).toFixed(1);
+
+          const pillEl = document.createElement("div");
+          pillEl.innerHTML = `<div style="background: rgba(15, 23, 42, 0.9); border: 2.5px solid #64748b; color: #cbd5e1; padding: 4px 10px; border-radius: 14px; font-weight: 800; font-size: 10px; cursor: pointer; box-shadow: 0 4px 8px rgba(0,0,0,0.4); white-space: nowrap;">Alt: ${durationMin}m (${distanceKm}km)</div>`;
+
+          pillEl.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setActiveRouteIdx(idx);
+          });
+
+          const midMarker = new mapboxgl.Marker({ element: pillEl })
+            .setLngLat(midPt as [number, number])
+            .addTo(currentMap);
+
+          altMidpointMarkers.current.push(midMarker);
+        } catch (err) {
+          console.warn("Could not construct alternative mid-point label:", err);
+        }
+      }
+    });
+  };
+
+  // =====================================================
+  // 🚐 DRAW ACTIVE & ALTERNATIVE TRANSIT ROUTES ON THE MAP
+  // =====================================================
+  const drawTransitRoutesOnMap = async () => {
+    if (!map.current || transitCandidates.length === 0 || !origin || !selectedPlace) return;
+    const currentMap = map.current;
+
+    // 1. Clear old layers and markers
+    for (let i = 0; i < 5; i++) {
+      if (currentMap.getLayer(`alt-transit-layer-${i}`)) currentMap.removeLayer(`alt-transit-layer-${i}`);
+      if (currentMap.getSource(`alt-transit-source-${i}`)) currentMap.removeSource(`alt-transit-source-${i}`);
+    }
+    transitMarkers.current.forEach(m => m.remove());
+    transitMarkers.current = [];
+
+    const activePlan = transitCandidates[activeTransitIdx];
+    const startingCoords = origin.coords;
+    const endLon = parseFloat(selectedPlace.lon);
+    const endLat = parseFloat(selectedPlace.lat);
+
+    // 2. Render all alternative transit candidates as gray/dashed lines
+    transitCandidates.forEach((candidate, idx) => {
+      if (idx === activeTransitIdx) return;
+
+      const features: any[] = [];
+      // Walk 1
+      features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [startingCoords, candidate.boardingCoords] } });
+      // Ride 1
+      features.push({ type: "Feature", properties: {}, geometry: candidate.slicedGeometry });
+
+      if (candidate.transfer) {
+        // Walk transfer
+        features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [candidate.dropoffCoords, candidate.transfer.boardingCoords] } });
+        // Ride 2
+        features.push({ type: "Feature", properties: {}, geometry: candidate.transfer.slicedGeometry });
+        // Walk to dest
+        features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [candidate.transfer.dropoffCoords, [endLon, endLat]] } });
+      } else {
+        // Walk to dest
+        features.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [candidate.dropoffCoords, [endLon, endLat]] } });
+      }
+
+      const sourceId = `alt-transit-source-${idx}`;
+      const layerId = `alt-transit-layer-${idx}`;
+
+      currentMap.addSource(sourceId, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: features } as any
+      });
+
+      currentMap.addLayer({
+        id: layerId,
+        type: "line",
+        source: sourceId,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#94a3b8",
+          "line-width": 4,
+          "line-dasharray": [2, 2],
+          "line-opacity": 0.45
+        }
+      });
+
+      // Map alt click triggers swap
+      (currentMap as any).on("click", layerId, (e: any) => {
+        if (e.originalEvent) e.originalEvent.stopPropagation();
+        setActiveTransitIdx(idx);
+      });
+
+      currentMap.on("mouseenter", layerId, () => {
+        currentMap.getCanvas().style.cursor = "pointer";
+      });
+      currentMap.on("mouseleave", layerId, () => {
+        currentMap.getCanvas().style.cursor = "";
+      });
+
+      // 📍 Add mid-point tag on alternative transit routes
+      try {
+        const midCoords = candidate.transfer ? candidate.transfer.boardingCoords : candidate.boardingCoords;
+        const pillEl = document.createElement("div");
+        pillEl.innerHTML = `<div style="background: rgba(15, 23, 42, 0.9); border: 2.5px solid #475569; color: #94a3b8; padding: 4px 10px; border-radius: 14px; font-weight: 800; font-size: 10px; cursor: pointer; box-shadow: 0 4px 8px rgba(0,0,0,0.4); white-space: nowrap;">🚐 Alt Option (${candidate.transfer ? "1 Trans." : "Direct"})</div>`;
+
+        pillEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setActiveTransitIdx(idx);
+        });
+
+        const midMarker = new mapboxgl.Marker({ element: pillEl })
+          .setLngLat(midCoords as [number, number])
+          .addTo(currentMap);
+
+        transitMarkers.current.push(midMarker);
+      } catch (e) {}
+    });
+
+    // 3. Render active transit plan (High-res snapping + precise distance indicators)
+    if (activePlan.transfer) {
+      const leg1 = activePlan;
+      const leg2 = activePlan.transfer;
+
+      let ride1Geometry = leg1.slicedGeometry;
+      let ride2Geometry = leg2.slicedGeometry;
+      let finalBoard1 = leg1.boardingCoords;
+      let finalDrop1 = leg1.dropoffCoords;
+      let finalBoard2 = leg2.boardingCoords;
+      let finalDrop2 = leg2.dropoffCoords;
+
+      try {
+        const [hiRes1, hiRes2] = await Promise.all([
+          fetchExactJeepneyPath(leg1.activePathCoords),
+          fetchExactJeepneyPath(leg2.activePathCoords),
+        ]);
+
+        if (hiRes1?.routes?.[0]?.geometry) {
+          const line1 = turf.lineString(hiRes1.routes[0].geometry.coordinates);
+          const snap1Board = turf.nearestPointOnLine(line1, turf.point(startingCoords));
+          const snap1Drop = turf.nearestPointOnLine(line1, turf.point(leg1.dropoffCoords));
+          finalBoard1 = snap1Board.geometry.coordinates;
+          finalDrop1 = snap1Drop.geometry.coordinates;
+          ride1Geometry = turf.lineSlice(snap1Board, snap1Drop, line1).geometry;
+        }
+
+        if (hiRes2?.routes?.[0]?.geometry) {
+          const line2 = turf.lineString(hiRes2.routes[0].geometry.coordinates);
+          const snap2Board = turf.nearestPointOnLine(line2, turf.point(leg2.boardingCoords));
+          const snap2Drop = turf.nearestPointOnLine(line2, turf.point([endLon, endLat]));
+          finalBoard2 = snap2Board.geometry.coordinates;
+          finalDrop2 = snap2Drop.geometry.coordinates;
+          ride2Geometry = turf.lineSlice(snap2Board, snap2Drop, line2).geometry;
+        }
+      } catch (err) {
+        console.warn("High-res snapped fetch failed, falling back to straight geometries.", err);
+      }
+
+      const walk1Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${startingCoords[0]},${startingCoords[1]};${finalBoard1[0]},${finalBoard1[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+      const walk2Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${finalDrop1[0]},${finalDrop1[1]};${finalBoard2[0]},${finalBoard2[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+      const walk3Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${finalDrop2[0]},${finalDrop2[1]};${endLon},${endLat}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+
+      const [walk1Res, walk2Res, walk3Res] = await Promise.all([fetch(walk1Url), fetch(walk2Url), fetch(walk3Url)]);
+      const [walk1Data, walk2Data, walk3Data] = await Promise.all([walk1Res.json(), walk2Res.json(), walk3Res.json()]);
+
+      const walk1Meters = Math.round(walk1Data.routes[0].distance);
+      const walk2Meters = Math.round(walk2Data.routes[0].distance);
+      const walk3Meters = Math.round(walk3Data.routes[0].distance);
+
+      const color1 = JEEPNEY_HEX_COLORS[leg1.jeepney.colorCode] || '#000';
+      const color2 = JEEPNEY_HEX_COLORS[leg2.jeepney.colorCode] || '#000';
+
+      const instructions = [
+        ...walk1Data.routes[0].legs[0].steps,
+        { maneuver: { instruction: `🚐 BOARD: Ride the ${leg1.jeepney.routeCode} (${leg1.jeepney.colorCode} Jeep) heading towards ${leg1.headingTowards}.` }, distance: 0 },
+        { maneuver: { instruction: `🛑 ALIGHT: Get off here and walk to the next jeepney.` }, distance: 0 },
+        ...walk2Data.routes[0].legs[0].steps,
+        { maneuver: { instruction: `🔄 TRANSFER — Board the ${leg2.jeepney.routeCode} (${leg2.jeepney.colorCode} Jeep) heading towards ${leg2.headingTowards}.` }, distance: 0 },
+        { maneuver: { instruction: `🛑 ALIGHT: Get off here and continue on foot.` }, distance: 0 },
+        ...walk3Data.routes[0].legs[0].steps,
+      ];
+      setRouteInstructions(instructions);
+
+      // 📍 BOARDING POINT 1 MARKER (precise distance)
+      const b1El = document.createElement("div");
+      b1El.innerHTML = `<div style="background: white; border: 3px solid #3b82f6; color: #1e3a8a; padding: 5px 12px; border-radius: 16px; font-weight: 800; font-size: 11px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); white-space: nowrap;">🚐 Board ${leg1.jeepney.routeCode} (Walk ${walk1Meters}m)</div>`;
+      const board1Marker = new mapboxgl.Marker({ element: b1El }).setLngLat(finalBoard1 as [number, number]).addTo(currentMap);
+
+      // 📍 ALIGHT POINT 1 / TRANSFER WALK MARKER
+      const alightEl = document.createElement('div');
+      alightEl.innerHTML = `<div style="background: white; border: 3px solid #dc2626; color: #dc2626; padding: 5px 12px; border-radius: 16px; font-weight: 800; font-size: 11px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); white-space: nowrap;">🛑 Get Down (Walk ${walk2Meters}m to next)</div>`;
+      const alight1Marker = new mapboxgl.Marker({ element: alightEl }).setLngLat(finalDrop1 as [number, number]).addTo(currentMap);
+
+      // 📍 BOARDING POINT 2 MARKER
+      const b2El = document.createElement('div');
+      b2El.innerHTML = `<div style="background: white; border: 3px solid #16a34a; color: #16a34a; padding: 5px 12px; border-radius: 16px; font-weight: 800; font-size: 11px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); white-space: nowrap;">🚐 Board Next (${leg2.jeepney.routeCode})</div>`;
+      const board2Marker = new mapboxgl.Marker({ element: b2El }).setLngLat(finalBoard2 as [number, number]).addTo(currentMap);
+
+      // 📍 FINAL ALIGHT / DESTINATION MARKER
+      const destEl = document.createElement("div");
+      destEl.innerHTML = `<div style="background: white; border: 3px solid #db2777; color: #db2777; padding: 5px 12px; border-radius: 16px; font-weight: 800; font-size: 11px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); white-space: nowrap;">🏁 Alight (Walk ${walk3Meters}m to destination)</div>`;
+      const destMarker = new mapboxgl.Marker({ element: destEl }).setLngLat(finalDrop2 as [number, number]).addTo(currentMap);
+
+      transitMarkers.current.push(board1Marker, alight1Marker, board2Marker, destMarker);
+
+      const transitGeoJSON = {
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk1Data.routes[0].geometry },
+          { type: "Feature", properties: { color: color1,     dashArray: [1, 0] }, geometry: ride1Geometry },
+          { type: "Feature", properties: { color: "#f59e0b",  dashArray: [2, 2] }, geometry: walk2Data.routes[0].geometry },
+          { type: "Feature", properties: { color: color2,     dashArray: [1, 0] }, geometry: ride2Geometry },
+          { type: "Feature", properties: { color: "#10b981",  dashArray: [2, 2] }, geometry: walk3Data.routes[0].geometry },
+        ]
+      };
+
+      const source = currentMap.getSource("active-route") as mapboxgl.GeoJSONSource;
+      if (source) {
+        source.setData(transitGeoJSON as any);
+        currentMap.setPaintProperty("active-route-layer", "line-color", ['get', 'color']);
+        currentMap.setPaintProperty("active-route-layer", "line-dasharray", ['get', 'dashArray']);
+      }
+
+      const bounds = new mapboxgl.LngLatBounds();
+      walk1Data.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
+      if (ride1Geometry.coordinates) ride1Geometry.coordinates.forEach((c: any) => bounds.extend(c));
+      walk2Data.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
+      if (ride2Geometry.coordinates) ride2Geometry.coordinates.forEach((c: any) => bounds.extend(c));
+      walk3Data.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
+      currentMap.fitBounds(bounds, { padding: 80, duration: 1200 });
+
+    } else {
+      // Direct route rendering
+      const leg = activePlan;
+      let rideGeometry = leg.slicedGeometry;
+      let finalBoardCoords = leg.boardingCoords;
+      let finalDropCoords = leg.dropoffCoords;
+
+      try {
+        const fullJeepneyData = await fetchExactJeepneyPath(leg.activePathCoords);
+        if (fullJeepneyData?.routes?.[0]?.geometry) {
+          const highResLine = turf.lineString(fullJeepneyData.routes[0].geometry.coordinates);
+          const preciseBoardPt = turf.nearestPointOnLine(highResLine, turf.point(startingCoords));
+          const preciseDropPt = turf.nearestPointOnLine(highResLine, turf.point([endLon, endLat]));
+          finalBoardCoords = preciseBoardPt.geometry.coordinates;
+          finalDropCoords = preciseDropPt.geometry.coordinates;
+          rideGeometry = turf.lineSlice(preciseBoardPt, preciseDropPt, highResLine).geometry;
+        }
+      } catch (error) {
+        console.warn("High-res Snap failed, using straight poly fallbacks.");
+      }
+
+      const walk1Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${startingCoords[0]},${startingCoords[1]};${finalBoardCoords[0]},${finalBoardCoords[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+      const walk2Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${finalDropCoords[0]},${finalDropCoords[1]};${endLon},${endLat}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
+
+      const [walk1Res, walk2Res] = await Promise.all([fetch(walk1Url), fetch(walk2Url)]);
+      const [walk1Data, walk2Data] = await Promise.all([walk1Res.json(), walk2Res.json()]);
+
+      const walk1Meters = Math.round(walk1Data.routes[0].distance);
+      const walk2Meters = Math.round(walk2Data.routes[0].distance);
+
+      setRouteInstructions([
+        ...walk1Data.routes[0].legs[0].steps,
+        { maneuver: { instruction: `🚐 BOARD JEEPNEY: Ride the ${leg.jeepney.routeCode} (${leg.jeepney.colorCode} Jeep) heading towards ${leg.headingTowards}.` }, distance: 0 },
+        { maneuver: { instruction: `🛑 ALIGHT JEEPNEY: Get off here and continue on foot.` }, distance: 0 },
+        ...walk2Data.routes[0].legs[0].steps
+      ]);
+
+      // 📍 BOARDING POINT 1 MARKER
+      const b1El = document.createElement("div");
+      b1El.innerHTML = `<div style="background: white; border: 3px solid #3b82f6; color: #1e3a8a; padding: 5px 12px; border-radius: 16px; font-weight: 800; font-size: 11px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); white-space: nowrap;">🚐 Board ${leg.jeepney.routeCode} (Walk ${walk1Meters}m)</div>`;
+      const board1Marker = new mapboxgl.Marker({ element: b1El }).setLngLat(finalBoardCoords as [number, number]).addTo(currentMap);
+
+      // 📍 FINAL ALIGHT MARKER
+      const destEl = document.createElement("div");
+      destEl.innerHTML = `<div style="background: white; border: 3px solid #db2777; color: #db2777; padding: 5px 12px; border-radius: 16px; font-weight: 800; font-size: 11px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); white-space: nowrap;">🏁 Alight (Walk ${walk2Meters}m to destination)</div>`;
+      const destMarker = new mapboxgl.Marker({ element: destEl }).setLngLat(finalDropCoords as [number, number]).addTo(currentMap);
+
+      transitMarkers.current.push(board1Marker, destMarker);
+
+      const color = JEEPNEY_HEX_COLORS[leg.jeepney.colorCode] || '#000';
+      const transitGeoJSON = {
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk1Data.routes[0].geometry },
+          { type: "Feature", properties: { color: color,        dashArray: [1, 0] }, geometry: rideGeometry },
+          { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk2Data.routes[0].geometry }
+        ]
+      };
+
+      const source = currentMap.getSource("active-route") as mapboxgl.GeoJSONSource;
+      if (source) {
+        source.setData(transitGeoJSON as any);
+        currentMap.setPaintProperty("active-route-layer", "line-color", ['get', 'color']);
+        currentMap.setPaintProperty("active-route-layer", "line-dasharray", ['get', 'dashArray']);
+      }
+
+      const bounds = new mapboxgl.LngLatBounds();
+      walk1Data.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
+      if (rideGeometry.coordinates) rideGeometry.coordinates.forEach((c: any) => bounds.extend(c));
+      walk2Data.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
+      currentMap.fitBounds(bounds, { padding: 80, duration: 1200 });
+    }
+  };
+
+  // Sync alternative route renderings when active indexes or modes change
+  useEffect(() => {
+    if (isRoutingMode) {
+      if (travelMode === "transit") {
+        if (transitCandidates.length > 0) {
+          void drawTransitRoutesOnMap();
+        }
+      } else {
+        if (alternativeRoutes.length > 0) {
+          let activeColor = "#3b82f6"; // Driving
+          if (travelMode === "walking") activeColor = "#10b981";
+          if (travelMode === "cycling") activeColor = "#f59e0b"; // Motor
+          
+          drawAlternativeModalityRoutes(alternativeRoutes, activeRouteIdx, activeColor);
+        }
+      }
+    }
+  }, [activeRouteIdx, alternativeRoutes, activeTransitIdx, transitCandidates, travelMode, isRoutingMode]);
+
+  // =====================================================
+  // 🧭 MAIN ROUTE REQUEST FLOW
+  // =====================================================
+  const handleRouteRequest = async (place: any, mode: TravelMode, overrideStart?: number[]) => {
     const startingCoords = overrideStart || origin?.coords;
     
     if (!map.current || !startingCoords) return;
     const currentMap = map.current;
 
+    // Reset Routing states
+    clearCustomNavigationVisuals();
+    setAlternativeRoutes([]);
+    setTransitCandidates([]);
+
+    // Hide all default jeepney route overlays
     mockRoutes.forEach(route => {
       const fwdLayerId = `route-layer-${route.id}-fwd`;
       const revLayerId = `route-layer-${route.id}-rev`;
@@ -424,231 +828,34 @@ export default function MapComponent() {
       .addTo(currentMap);
 
     try {
-      if (mode === 'transit') {
-        // 🟢 1. WALKABLE FALLBACK
-        const directDistance = getDistanceMeters(startingCoords, [endLon, endLat]);
-        
-        if (directDistance < 600) { 
-          setRouteInstructions([{ maneuver: { instruction: "Calculating walking route..." }, distance: 0 }]);
-          
-          const walkUrl = `https://api.mapbox.com/directions/v5/mapbox/walking/${startLon},${startLat};${endLon},${endLat}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
-          const walkRes = await fetch(walkUrl);
-          const walkData = await walkRes.json();
-
-          setRouteInstructions([
-            { maneuver: { instruction: "🚶 Destination is very close! Walking is faster than waiting for a Jeepney." }, distance: walkData.routes[0].distance },
-            ...walkData.routes[0].legs[0].steps
-          ]);
-
-          const walkGeoJSON = {
-            type: "FeatureCollection",
-            features: [{ type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walkData.routes[0].geometry }]
-          };
-
-          const source = currentMap.getSource("active-route") as mapboxgl.GeoJSONSource;
-          if (source) {
-            source.setData(walkGeoJSON as any);
-            currentMap.setPaintProperty("active-route-layer", "line-color", ['get', 'color']);
-            currentMap.setPaintProperty("active-route-layer", "line-dasharray", ['get', 'dashArray']);
-            currentMap.setLayoutProperty("active-route-layer", "visibility", "visible");
-          } else {
-            currentMap.addSource("active-route", { type: "geojson", data: walkGeoJSON as any });
-            currentMap.addLayer({
-              id: "active-route-layer",
-              type: "line",
-              source: "active-route",
-              layout: { "line-join": "round", "line-cap": "round", "visibility": "visible" },
-              paint: { "line-color": ['get', 'color'], "line-width": 6, "line-dasharray": ['get', 'dashArray'] },
-            });
-          }
-          
-          const bounds = new mapboxgl.LngLatBounds();
-          walkData.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
-          currentMap.fitBounds(bounds, { padding: 80, duration: 1200 });
-
-          return; 
-        }
-
-        // 🟢 2. JEEPNEY SEARCH ENGINE
-        setRouteInstructions([{ maneuver: { instruction: "Calculating optimal Jeepney route..." }, distance: 0 }]);
-        const transitPlan = findBestJeepneyRoute(startingCoords, [endLon, endLat]);
-
-        if (!transitPlan) {
-          setRouteInstructions([{ maneuver: { instruction: "Destination is too far from any Jeepney route." }, distance: 0 }]);
-          return;
-        }
-
-        // ==========================================
-        // 🟢 3. THE ULTIMATE HIGH-RES RE-CALCULATION
-        // ==========================================
-        let rideGeometry = transitPlan.slicedGeometry;
-        let finalBoardCoords = transitPlan.boardingCoords;
-        let finalDropCoords = transitPlan.dropoffCoords;
-
-        try {
-          // Ask Mapbox for the perfect, curved road connecting your raw MockData points
-          const fullJeepneyData = await fetchExactJeepneyPath(transitPlan.activePathCoords);
-          
-          if (fullJeepneyData?.routes?.[0]?.geometry) {
-            const highResLine = turf.lineString(fullJeepneyData.routes[0].geometry.coordinates);
-
-            // Re-calculate the exact pickup/dropoff by snapping the user's pins
-            // directly onto the actual STREET curves, not the mathematical straight lines!
-            const preciseBoardPt = turf.nearestPointOnLine(highResLine, turf.point(startingCoords));
-            const preciseDropPt = turf.nearestPointOnLine(highResLine, turf.point([endLon, endLat]));
-
-            finalBoardCoords = preciseBoardPt.geometry.coordinates;
-            finalDropCoords = preciseDropPt.geometry.coordinates;
-
-            // Cleanly slice the beautifully curved road
-            rideGeometry = turf.lineSlice(preciseBoardPt, preciseDropPt, highResLine).geometry;
-          }
-        } catch (error) {
-          console.warn("High-res recalculation failed, falling back to low-poly geometry.");
-        }
-
-        // 🟢 4. FETCH PRECISE WALKING ROUTES
-        const walk1Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${startingCoords[0]},${startingCoords[1]};${finalBoardCoords[0]},${finalBoardCoords[1]}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
-        const walk2Url = `https://api.mapbox.com/directions/v5/mapbox/walking/${finalDropCoords[0]},${finalDropCoords[1]};${endLon},${endLat}?geometries=geojson&steps=true&access_token=${MAPBOX_TOKEN}`;
-
-        const [walk1Res, walk2Res] = await Promise.all([fetch(walk1Url), fetch(walk2Url)]);
-        const walk1Data = await walk1Res.json();
-        const walk2Data = await walk2Res.json();
-
-        const walkToJeepneySteps = walk1Data.routes[0].legs[0].steps;
-        const walkToDestinationSteps = walk2Data.routes[0].legs[0].steps;
-
-        const customInstructions = [
-          ...walkToJeepneySteps, 
-          { maneuver: { instruction: `🚐 BOARD JEEPNEY: Ride the ${transitPlan.jeepney.routeCode} (${transitPlan.jeepney.colorCode} Jeep) heading towards ${transitPlan.headingTowards}.` }, distance: 0 },
-          { maneuver: { instruction: `🛑 ALIGHT JEEPNEY: Get off here and continue on foot.` }, distance: 0 },
-          ...walkToDestinationSteps 
-        ];
-
-        setRouteInstructions(customInstructions);
-
-        const transitGeoJSON = {
-          type: "FeatureCollection",
-          features: [
-            { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk1Data.routes[0].geometry },
-            { type: "Feature", properties: { color: JEEPNEY_HEX_COLORS[transitPlan.jeepney.colorCode], dashArray: [1, 0] }, geometry: rideGeometry },
-            { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk2Data.routes[0].geometry }
-          ]
-        };
-
-        const source = currentMap.getSource("active-route") as mapboxgl.GeoJSONSource;
-        if (source) {
-          source.setData(transitGeoJSON as any);
-          currentMap.setPaintProperty("active-route-layer", "line-color", ['get', 'color']);
-          currentMap.setPaintProperty("active-route-layer", "line-dasharray", ['get', 'dashArray']);
-          currentMap.setLayoutProperty("active-route-layer", "visibility", "visible");
-        } else {
-          currentMap.addSource("active-route", { type: "geojson", data: transitGeoJSON as any });
-          currentMap.addLayer({
-            id: "active-route-layer",
-            type: "line",
-            source: "active-route",
-            layout: { "line-join": "round", "line-cap": "round", "visibility": "visible" },
-            paint: { "line-color": ['get', 'color'], "line-width": 6, "line-dasharray": ['get', 'dashArray'] },
-          });
-        }
-
-        const bounds = new mapboxgl.LngLatBounds();
-        walk1Data.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
-        if (rideGeometry.coordinates) rideGeometry.coordinates.forEach((c: any) => bounds.extend(c));
-        walk2Data.routes[0].geometry.coordinates.forEach((c: any) => bounds.extend(c));
-        currentMap.fitBounds(bounds, { padding: 80, duration: 1200 });
-
-        return; 
+      // 1. Fetch Transit Options first to load transit summary
+      const candidates = findTransitRouteCandidates(startingCoords, [endLon, endLat]);
+      if (candidates && candidates.length > 0) {
+        setTransitCandidates(candidates);
+        setActiveTransitIdx(0);
       }
 
-      const url = `https://api.mapbox.com/directions/v5/mapbox/${mode}/${startLon},${startLat};${endLon},${endLat}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`;
-      
-      const response = await fetch(url);
-      const data = await response.json();
-
-      if (!data.routes || data.routes.length === 0) {
-        console.warn(`No route found for ${mode}.`);
+      // =============================================
+      // 🚐 TRANSIT MODE
+      // =============================================
+      if (mode === "transit") {
+        // Trigger draw effect by setting index (handled inside useEffect)
         return;
       }
 
-      // 🟢 NEW: OFF-ROAD DETECTION (For Cars & Motorcycles only)
-      if (mode === 'driving' || mode === 'cycling') {
-        const snappedStart = data.waypoints[0].location; // Where Mapbox put the car
-        const snappedEnd = data.waypoints[data.waypoints.length - 1].location; // Where Mapbox parked the car
+      // =============================================
+      // 🚗 WALKING, DRIVING, CYCLING MODES (WITH ALTERNATIVES)
+      // =============================================
+      const mapboxMode = mode === "cycling" ? "driving" : mode; // use driving profile for motor fallback
+      const url = `https://api.mapbox.com/directions/v5/mapbox/${mapboxMode}/${startLon},${startLat};${endLon},${endLat}?geometries=geojson&overview=full&steps=true&alternatives=true&access_token=${MAPBOX_TOKEN}`;
+      
+      const res = await fetch(url);
+      const data = await res.json();
 
-        // Calculate how far Mapbox had to teleport the pins
-        const startTeleportDist = getDistanceMeters([startLon, startLat], snappedStart);
-        const endTeleportDist = getDistanceMeters([endLon, endLat], snappedEnd);
-
-        // If it teleported more than 50 meters, block the route!
-        if (startTeleportDist > 25 || endTeleportDist > 25) {
-          setRouteInstructions([{ 
-            maneuver: { 
-              instruction: "🚫 OFF-ROAD WARNING: Your starting or ending pin is too far from a drivable street! Please move the pin closer to a road, or switch to Walking / Jeepney mode." 
-            }, 
-            distance: 0 
-          }]);
-          
-          // Clear any existing active routes off the map
-          if (currentMap.getLayer("active-route-layer")) {
-            currentMap.setLayoutProperty("active-route-layer", "visibility", "none");
-          }
-          return; // Stop drawing!
-        }
+      if (data.routes && data.routes.length > 0) {
+        setAlternativeRoutes(data.routes);
+        setActiveRouteIdx(0);
       }
-
-      // If it passes the test, proceed with normal instructions
-      setRouteInstructions(data.routes[0].legs[0].steps);
-
-      const routeGeometry = data.routes[0].geometry;
-      const allCoordinatesToFrame = routeGeometry.coordinates;
-
-      let finalColor = "#3b82f6"; // Blue for Driving
-      let dashArray = [1, 0];     // Solid line
-
-      if (mode === 'walking') {
-        finalColor = "#10b981";   // Green for Walking
-        dashArray = [2, 2];       // Dashed line
-      } else if (mode === 'cycling') {
-        finalColor = "#f59e0b";   // Orange for Motorcycle
-      }
-
-      const activeRouteGeoJSON = {
-        type: "FeatureCollection",
-        features: [{ type: "Feature", properties: {}, geometry: routeGeometry }]
-      };
-
-      const source = currentMap.getSource("active-route") as mapboxgl.GeoJSONSource;
-      if (source) {
-        source.setData(activeRouteGeoJSON as any);
-        currentMap.setPaintProperty("active-route-layer", "line-color", finalColor);
-        currentMap.setPaintProperty("active-route-layer", "line-dasharray", dashArray);
-        currentMap.setLayoutProperty("active-route-layer", "visibility", "visible");
-      } else {
-        currentMap.addSource("active-route", { type: "geojson", data: activeRouteGeoJSON as any });
-        currentMap.addLayer({
-          id: "active-route-layer",
-          type: "line",
-          source: "active-route",
-          layout: { "line-join": "round", "line-cap": "round", "visibility": "visible" },
-          paint: { 
-            "line-color": finalColor, 
-            "line-width": 6, 
-            "line-opacity": 0.9,
-            "line-dasharray": dashArray
-          },
-        });
-      }
-
-      const bounds = new mapboxgl.LngLatBounds();
-      allCoordinatesToFrame.forEach((c: any) => bounds.extend(c));
-      currentMap.fitBounds(bounds, { padding: 80, duration: 1200 });
-
-      const endTime = performance.now(); // ⏱️ Stop timer
-      const duration = (endTime - startTime).toFixed(2);
-
-      console.log(`Navigation Routing Engine took ${duration}ms for ${mode} mode.`);
 
     } catch (error) { 
       console.error("Routing Error:", error); 
@@ -730,6 +937,9 @@ export default function MapComponent() {
     } catch (error) { console.error(error); }
   };
 
+  // =====================================================
+  // 🗺️ MAP INITIALIZATION
+  // =====================================================
   useEffect(() => {
     if (!MAPBOX_TOKEN || !mapContainer.current || map.current) return;
 
@@ -750,18 +960,13 @@ export default function MapComponent() {
     const updateMarkerVisibility = () => {
       const zoom = currentMap.getZoom();
       
-      // ==========================================
-      // 🟢 MASTER ZOOM CONTROLS
-      // Higher number = You must zoom in closer to see them!
-      // ==========================================
-      const SHOW_HOSPITALS = 14.0;       // Priority 1 (Currently pops up at city/district view)
-      const SHOW_SCHOOLS_BANKS = 16.5;   // Priority 2 (Currently pops up at deep neighborhood view)
-      const SHOW_EVERYTHING = 17.5;      // Priority 3 (Minor places - only pops up at extreme street view!)
+      const SHOW_HOSPITALS = 14.0;
+      const SHOW_SCHOOLS_BANKS = 16.5;
+      const SHOW_EVERYTHING = 17.5;
 
       markers.current.forEach((marker) => {
         const el = marker.getElement();
         
-        // Hide everything if navigating
         if (isRoutingModeRef.current) {
           el.style.display = "none";
           return; 
@@ -769,18 +974,17 @@ export default function MapComponent() {
 
         const priority = parseInt(el.dataset.priority || "3");
 
-        // Execute visibility based on your master controls
         if (zoom < SHOW_HOSPITALS) {
-          el.style.display = "none"; // Zoomed out too far: Hide all
+          el.style.display = "none";
         } 
         else if (priority > 1 && zoom < SHOW_SCHOOLS_BANKS) {
-          el.style.display = "none"; // Hide Priority 2 & 3
+          el.style.display = "none";
         } 
         else if (priority > 2 && zoom < SHOW_EVERYTHING) {
-          el.style.display = "none"; // Hide Priority 3
+          el.style.display = "none";
         } 
         else {
-          el.style.display = "flex"; // Show it!
+          el.style.display = "flex";
         }
       });
     };
@@ -823,7 +1027,6 @@ export default function MapComponent() {
     });
 
     currentMap.on("click", (e) => {
-      // 🟢 THE FIX: Only allow clicking the map to move the pin IF the blue banner is active!
       if (!isPickingOriginRef.current) return; 
 
       const newCoords = [e.lngLat.lng, e.lngLat.lat];
@@ -837,16 +1040,6 @@ export default function MapComponent() {
       
       if (startMarkerRef.current) {
         startMarkerRef.current.setLngLat(e.lngLat);
-      }
-
-      if (isRoutingModeRef.current) {
-        setTimeout(() => {
-          const destPlace = document.getElementById("popup-portal-root")?.children.length 
-            ? (window as any).currentActivePlace 
-            : null; 
-            
-          // The state dependency array will catch the 'origin' change and trigger routing.
-        }, 100);
       }
     });
 
@@ -866,21 +1059,47 @@ export default function MapComponent() {
         setMode={setTravelMode}
         routeInstructions={routeInstructions}
         visibleRouteIds={visibleRouteIds}
-        isolatedDirectionId={isolatedDirectionId} // 🟢 NEW PROP
+        isolatedDirectionId={isolatedDirectionId}
         onSelectOriginMode={() => setIsPickingOrigin(true)}
         onSelectRoute={selectSingleRoute}
+
+        // Alternative modality states
+        alternativeRoutes={alternativeRoutes}
+        activeRouteIdx={activeRouteIdx}
+        setActiveRouteIdx={setActiveRouteIdx}
+
+        // Transit candidate states
+        transitCandidates={transitCandidates}
+        activeTransitIdx={activeTransitIdx}
+        setActiveTransitIdx={setActiveTransitIdx}
         
         onCloseRouting={() => {
           setIsRoutingMode(false);
           setIsPickingOrigin(false);
           setRouteInstructions([]);
+          setAlternativeRoutes([]);
+          setActiveRouteIdx(0);
+          setTransitCandidates([]);
+          setActiveTransitIdx(0);
           
-          setIsolatedDirectionId(null); // Clear isolated view when closing routing
+          setIsolatedDirectionId(null);
           routeEndpointMarkers.current.forEach(marker => marker.remove());
           routeEndpointMarkers.current = [];
 
           if (map.current?.getLayer("active-route-layer")) map.current.setLayoutProperty("active-route-layer", 'visibility', 'none');
           if ((window as any).currentDestMarker) (window as any).currentDestMarker.remove();
+          
+          clearCustomNavigationVisuals(); // Clean midpoint labels + transfer markers
+
+          // Clean alternative route lines on route closure
+          if (map.current) {
+            for (let i = 0; i < 5; i++) {
+              if (map.current.getLayer(`alt-route-layer-${i}`)) map.current.removeLayer(`alt-route-layer-${i}`);
+              if (map.current.getSource(`alt-route-source-${i}`)) map.current.removeSource(`alt-route-source-${i}`);
+              if (map.current.getLayer(`alt-transit-layer-${i}`)) map.current.removeLayer(`alt-transit-layer-${i}`);
+              if (map.current.getSource(`alt-transit-source-${i}`)) map.current.removeSource(`alt-transit-source-${i}`);
+            }
+          }
           
           mockRoutes.forEach(r => {
             const fwdLayerId = `route-layer-${r.id}-fwd`;
@@ -889,11 +1108,11 @@ export default function MapComponent() {
             
             if (map.current?.getLayer(fwdLayerId)) {
               map.current.setLayoutProperty(fwdLayerId, 'visibility', vis);
-              map.current.setPaintProperty(fwdLayerId, 'line-opacity', 1.0); // Reset Opacity
+              map.current.setPaintProperty(fwdLayerId, 'line-opacity', 1.0);
             }
             if (map.current?.getLayer(revLayerId)) {
               map.current.setLayoutProperty(revLayerId, 'visibility', vis);
-              map.current.setPaintProperty(revLayerId, 'line-opacity', 1.0); // Reset Opacity
+              map.current.setPaintProperty(revLayerId, 'line-opacity', 1.0);
             }
             if (map.current?.getLayer(`${fwdLayerId}-outline`)) {
               map.current.setLayoutProperty(`${fwdLayerId}-outline`, 'visibility', vis);
@@ -950,7 +1169,7 @@ export default function MapComponent() {
             <button
               onClick={() => {
                 setVisibleRouteIds(mockRoutes.map(r => r.id));
-                setIsolatedDirectionId(null); // Clear isolated view
+                setIsolatedDirectionId(null);
                 routeEndpointMarkers.current.forEach(m => m.remove());
                 routeEndpointMarkers.current = [];
               }}
@@ -993,6 +1212,7 @@ export default function MapComponent() {
                 
                 if (map.current?.getLayer("active-route-layer")) map.current.setLayoutProperty("active-route-layer", 'visibility', 'none');
                 if ((window as any).currentDestMarker) (window as any).currentDestMarker.remove();
+                clearCustomNavigationVisuals();
 
                 mockRoutes.forEach(r => {
                   const fwdLayerId = `route-layer-${r.id}-fwd`;
