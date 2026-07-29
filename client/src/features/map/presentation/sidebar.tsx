@@ -135,7 +135,7 @@ export default function Sidebar({
                   : "border-transparent text-slate-400 hover:text-white"
               }`}
             >
-              📍 Explore Places
+              Explore Places
             </button>
             <button
               onClick={() => setActiveTab("routes")}
@@ -145,7 +145,7 @@ export default function Sidebar({
                   : "border-transparent text-slate-400 hover:text-white"
               }`}
             >
-              🚐 Jeepney Routes
+              Jeepney Routes
             </button>
           </div>
 
@@ -336,7 +336,7 @@ export default function Sidebar({
               }`}
             >
               <div className="flex items-center gap-1.5 text-xs font-black text-slate-400">
-                <span>🚗</span> Driving
+                 Driving
               </div>
               {activeDriveInfo ? (
                 <div className="mt-1.5">
@@ -366,12 +366,6 @@ export default function Sidebar({
                     : "bg-slate-800/50 text-slate-400 border-slate-850 hover:text-white hover:bg-slate-800"
                 }`}
               >
-                <span className="text-lg">
-                  {m === "driving" && "🚗"}
-                  {m === "walking" && "🚶"}
-                  {m === "cycling" && "🏍️"}
-                  {m === "transit" && "🚐"}
-                </span>
                 <span className="capitalize">{m === "cycling" ? "motor" : m}</span>
               </button>
             ))}
