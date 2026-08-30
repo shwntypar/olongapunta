@@ -236,6 +236,7 @@ export const findTransitRouteCandidates = (originCoords: number[], destCoords: n
   const MAX_WALK = 1.5;          // km
   const MAX_TRANSFER_WALK = 0.5; // km
   const TRANSFER_PENALTY = 0.5;
+  const MAX_TRANSFER_DETOUR_MULTIPLIER = 3; // total travel can't exceed 3x the direct distance
 
   const candidates: any[] = [];
 
@@ -308,9 +309,16 @@ export const findTransitRouteCandidates = (originCoords: number[], destCoords: n
       const walkFromB = turf.distance(dropB, endPoint);
       if (walkFromB > MAX_WALK) continue;
 
+      // Pick whichever valid transfer point minimizes TOTAL travel distance
+      // (both ride legs + the transfer walk) — not just the walking gap at the
+      // transfer itself. Optimizing on gap alone can pick a transfer point far
+      // down route A that happens to sit close to route B, producing a route
+      // that rides way past the destination and doubles back — a "loop" trip
+      // that's technically walkable but travels far more than necessary.
       let transferOffA: any = null;
       let transferOnB: any = null;
       let transferDist = Infinity;
+      let bestTotalRideKm = Infinity;
 
       for (const coord of a.coords) {
         const vertex = turf.point(coord);
@@ -320,14 +328,21 @@ export const findTransitRouteCandidates = (originCoords: number[], destCoords: n
         if (snapB.properties.location! >= dropB.properties.location!) continue;
 
         const gap = turf.distance(vertex, snapB);
-        if (gap < transferDist) {
+        if (gap > MAX_TRANSFER_WALK) continue;
+
+        const partialRideAKm = turf.length(turf.lineSlice(boardA, snapA, lineA));
+        const partialRideBKm = turf.length(turf.lineSlice(snapB, dropB, lineB));
+        const totalRideKm = partialRideAKm + partialRideBKm + gap;
+
+        if (totalRideKm < bestTotalRideKm) {
+          bestTotalRideKm = totalRideKm;
           transferDist = gap;
           transferOffA = snapA;
           transferOnB = snapB;
         }
       }
 
-      if (!transferOffA || transferDist > MAX_TRANSFER_WALK) continue;
+      if (!transferOffA) continue;
 
       const rideA = turf.lineSlice(boardA, transferOffA, lineA);
       const rideB = turf.lineSlice(transferOnB, dropB, lineB);
@@ -337,6 +352,12 @@ export const findTransitRouteCandidates = (originCoords: number[], destCoords: n
       if (rideAKm < 0.15 || rideBKm < 0.15) continue;
 
       const totalWalk = walkToA + transferDist + walkFromB;
+
+      // Reject candidates that travel far more than the direct distance would
+      // require — this is what rules out "loop" trips like riding south then
+      // doubling back north past the starting point.
+      if (totalWalk + rideAKm + rideBKm > directWalkKm * MAX_TRANSFER_DETOUR_MULTIPLIER) continue;
+
       const score = (totalWalk * 3) + rideAKm + rideBKm + TRANSFER_PENALTY;
 
       candidates.push({
