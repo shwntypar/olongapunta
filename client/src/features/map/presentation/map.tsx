@@ -53,6 +53,12 @@ const JEEPNEY_HEX_COLORS: Record<string, string> = {
   WHITE: '#e5e7eb'
 };
 
+// Google Maps-style walking line: blue, round-capped dots (a [0, gap] dasharray
+// on a round-cap layer draws circles instead of dashes). Shared by every walk
+// segment — standalone Walking mode, and the walk legs inside transit/tricycle plans.
+const WALK_LINE_COLOR = "#1a73e8";
+const WALK_DASH_ARRAY: [number, number] = [0, 2];
+
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 mapboxgl.accessToken = MAPBOX_TOKEN;
 const DEFAULT_CITY_CENTER = [
@@ -437,7 +443,7 @@ export default function MapComponent() {
         if (source) {
           source.setData(activeRouteGeoJSON as any);
           currentMap.setPaintProperty("active-route-layer", "line-color", activeColor);
-          currentMap.setPaintProperty("active-route-layer", "line-dasharray", travelMode === 'walking' ? [2, 2] : [1, 0]);
+          currentMap.setPaintProperty("active-route-layer", "line-dasharray", travelMode === 'walking' ? WALK_DASH_ARRAY : [1, 0]);
           currentMap.setLayoutProperty("active-route-layer", "visibility", "visible");
         } else {
           currentMap.addSource("active-route", { type: "geojson", data: activeRouteGeoJSON as any });
@@ -450,7 +456,7 @@ export default function MapComponent() {
               "line-color": activeColor, 
               "line-width": 6, 
               "line-opacity": 0.9, 
-              "line-dasharray": travelMode === 'walking' ? [2, 2] : [1, 0] 
+              "line-dasharray": travelMode === 'walking' ? WALK_DASH_ARRAY : [1, 0]
             },
           });
         }
@@ -476,7 +482,7 @@ export default function MapComponent() {
               "line-color": "#94a3b8",
               "line-width": 5,
               "line-opacity": 0.5,
-              "line-dasharray": travelMode === 'walking' ? [2, 2] : [1, 0]
+              "line-dasharray": travelMode === 'walking' ? WALK_DASH_ARRAY : [1, 0]
             }
           });
 
@@ -777,11 +783,11 @@ export default function MapComponent() {
       const transitGeoJSON = {
         type: "FeatureCollection",
         features: [
-          { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk1Data.routes[0].geometry },
+          { type: "Feature", properties: { color: WALK_LINE_COLOR, dashArray: WALK_DASH_ARRAY }, geometry: walk1Data.routes[0].geometry },
           { type: "Feature", properties: { color: color1,     dashArray: [1, 0] }, geometry: ride1Geometry },
-          { type: "Feature", properties: { color: "#f59e0b",  dashArray: [2, 2] }, geometry: walk2Data.routes[0].geometry },
+          { type: "Feature", properties: { color: "#f59e0b",  dashArray: WALK_DASH_ARRAY }, geometry: walk2Data.routes[0].geometry },
           { type: "Feature", properties: { color: color2,     dashArray: [1, 0] }, geometry: ride2Geometry },
-          { type: "Feature", properties: { color: "#10b981",  dashArray: [2, 2] }, geometry: walk3Data.routes[0].geometry },
+          { type: "Feature", properties: { color: WALK_LINE_COLOR,  dashArray: WALK_DASH_ARRAY }, geometry: walk3Data.routes[0].geometry },
         ]
       };
 
@@ -868,9 +874,9 @@ export default function MapComponent() {
       const transitGeoJSON = {
         type: "FeatureCollection",
         features: [
-          { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk1Data.routes[0].geometry },
+          { type: "Feature", properties: { color: WALK_LINE_COLOR, dashArray: WALK_DASH_ARRAY }, geometry: walk1Data.routes[0].geometry },
           { type: "Feature", properties: { color: color,        dashArray: [1, 0] }, geometry: rideGeometry },
-          { type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walk2Data.routes[0].geometry }
+          { type: "Feature", properties: { color: WALK_LINE_COLOR, dashArray: WALK_DASH_ARRAY }, geometry: walk2Data.routes[0].geometry }
         ]
       };
 
@@ -1091,13 +1097,13 @@ export default function MapComponent() {
 
     // Build the combined route line for the shared "active-route" layer
     const features: any[] = [];
-    if (walkBefore) features.push({ type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walkBefore.geometry });
+    if (walkBefore) features.push({ type: "Feature", properties: { color: WALK_LINE_COLOR, dashArray: WALK_DASH_ARRAY }, geometry: walkBefore.geometry });
     features.push({ type: "Feature", properties: { color: legs[0].zone.color, dashArray: [1, 0] }, geometry: rideLegs[0].geometry });
     if (legs.length === 2) {
-      if (transferWalk) features.push({ type: "Feature", properties: { color: "#f59e0b", dashArray: [2, 2] }, geometry: transferWalk.geometry });
+      if (transferWalk) features.push({ type: "Feature", properties: { color: "#f59e0b", dashArray: WALK_DASH_ARRAY }, geometry: transferWalk.geometry });
       features.push({ type: "Feature", properties: { color: legs[1].zone.color, dashArray: [1, 0] }, geometry: rideLegs[1].geometry });
     }
-    if (walkAfter) features.push({ type: "Feature", properties: { color: "#10b981", dashArray: [2, 2] }, geometry: walkAfter.geometry });
+    if (walkAfter) features.push({ type: "Feature", properties: { color: WALK_LINE_COLOR, dashArray: WALK_DASH_ARRAY }, geometry: walkAfter.geometry });
 
     const tricycleGeoJSON = { type: "FeatureCollection", features };
 
@@ -1178,7 +1184,7 @@ export default function MapComponent() {
       } else {
         if (alternativeRoutes.length > 0) {
           let activeColor = "#3b82f6"; // Driving
-          if (travelMode === "walking") activeColor = "#10b981";
+          if (travelMode === "walking") activeColor = WALK_LINE_COLOR;
           if (travelMode === "cycling") activeColor = "#f59e0b"; // Motor
           
           drawAlternativeModalityRoutes(alternativeRoutes, activeRouteIdx, activeColor);
@@ -1381,7 +1387,7 @@ export default function MapComponent() {
       type: "line",
       source: sourceId,
       layout: { visibility: isVisible ? "visible" : "none", "line-join": "round" },
-      paint: { "line-color": zone.color, "line-width": 2.5, "line-dasharray": [2, 1.5] },
+      paint: { "line-color": zone.color, "line-width": 2.5 },
     });
 
     currentMap.on("mouseenter", fillLayerId, () => {
@@ -1428,7 +1434,7 @@ export default function MapComponent() {
           type: "line", 
           source: fwdSourceId,
           layout: { "line-join": "round", "line-cap": "round" },
-          paint: { "line-color": "#374151", "line-width": 12, "line-opacity": 0.8 },
+          paint: { "line-color": "#ffffff", "line-width": 8, "line-opacity": 0.9 },
         });
 
         currentMap.addLayer({
@@ -1462,7 +1468,7 @@ export default function MapComponent() {
           type: "line", 
           source: revSourceId,
           layout: { "line-join": "round", "line-cap": "round" },
-          paint: { "line-color": "#374151", "line-width": 12, "line-opacity": 0.8 },
+          paint: { "line-color": "#ffffff", "line-width": 8, "line-opacity": 0.9 },
         });
 
         currentMap.addLayer({
@@ -1697,7 +1703,7 @@ export default function MapComponent() {
 
       <div className="relative flex-1 h-full">
 
-        <div className="absolute top-4 left-4 right-4 z-10 flex items-start gap-2">
+        <div className="absolute top-4 left-4 right-4 z-10 flex justify-between gap-2">
           <button
             onClick={() => setIsSidebarOpen(true)}
             className="lg:hidden flex-shrink-0 bg-white rounded-full shadow-md w-10 h-10 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:shadow-lg transition-all"
@@ -1756,14 +1762,15 @@ export default function MapComponent() {
                       <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Jeepney Routes</h4>
                       <button
                         onClick={() => {
-                          setVisibleRouteIds(mockRoutes.map(r => r.id));
+                          const allVisible = mockRoutes.every(r => visibleRouteIds.includes(r.id));
+                          setVisibleRouteIds(allVisible ? [] : mockRoutes.map(r => r.id));
                           setIsolatedDirectionId(null);
                           routeEndpointMarkers.current.forEach(m => m.remove());
                           routeEndpointMarkers.current = [];
                         }}
                         className="text-[11px] font-bold text-blue-600 hover:text-blue-700"
                       >
-                        Show all
+                        {mockRoutes.every(r => visibleRouteIds.includes(r.id)) ? "Hide all" : "Show all"}
                       </button>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
@@ -1796,10 +1803,13 @@ export default function MapComponent() {
                       <div className="flex items-center justify-between mb-2.5">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Tricycle Zones</h4>
                         <button
-                          onClick={() => setVisibleZoneIds(tricycleZones.map(z => z.id))}
+                          onClick={() => {
+                            const allVisible = tricycleZones.every(z => visibleZoneIds.includes(z.id));
+                            setVisibleZoneIds(allVisible ? [] : tricycleZones.map(z => z.id));
+                          }}
                           className="text-[11px] font-bold text-blue-600 hover:text-blue-700"
                         >
-                          Show all
+                          {tricycleZones.every(z => visibleZoneIds.includes(z.id)) ? "Hide all" : "Show all"}
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
