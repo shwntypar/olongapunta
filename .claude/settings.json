@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\mobile_check2.cjs\")",
+      "Bash(node \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\mobile_check3.cjs\")",
+      "Bash(node \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\mobile_check5.cjs\")",
+      "Bash(rm -f \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\mobile_check\"*.cjs)",
+      "Bash(node \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\sheet_check1.cjs\")",
+      "Bash(node \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\sheet_check2.cjs\")",
+      "Bash(rm -f \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\sheet_check\"*.cjs)",
+      "Bash(node \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\tabbar_check.cjs\")",
+      "Bash(node \"C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Admin-Desktop-olongapunta\\\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\\\scratchpad\\\\map_tab_check.cjs\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Admin\\AppData\\Local\\Temp\\claude\\c--Users-Admin-Desktop-olongapunta\\45572ce6-6916-4d2d-9fe8-1fbbf5503281\\scratchpad"
+    ]
+  }
+}

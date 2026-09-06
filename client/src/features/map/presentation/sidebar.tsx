@@ -1,10 +1,28 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { mockRoutes } from "../domain/MockData";
 import { tricycleZones } from "../domain/TricycleZoneData";
 
 export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle";
+
+// Mobile bottom-sheet snap points (Google Maps-style). Irrelevant on desktop,
+// where the sidebar is always a static, fully-visible left column.
+export type SheetState = "peek" | "half" | "full";
+
+const SHEET_PEEK_PX = 88;
+const SSR_FALLBACK_VH = 800; // used until the client reports the real viewport height post-mount, so SSR and first paint agree
+export const MOBILE_TAB_BAR_PX = 64; // height of the persistent bottom nav bar (Explore/Jeepneys/Zones) the sheet sits above, on mobile
+
+// half/full are viewport-relative. `vh` must come from state (not read from
+// `window` inline) so the server-rendered value and the client's first paint
+// match exactly — otherwise React flags a hydration mismatch.
+const getSnapHeightPx = (state: SheetState, vh: number): number => {
+  if (state === "peek") return SHEET_PEEK_PX;
+  const usableVh = vh - MOBILE_TAB_BAR_PX;
+  if (state === "full") return usableVh * 0.92;
+  return usableVh * 0.55;
+};
 
 interface SidebarProps {
   places: any[];
@@ -23,9 +41,14 @@ interface SidebarProps {
   onSelectPlace: (place: any) => void;
   onStartNavigation: (place: any) => void;
 
-  // 📱 Responsive drawer control (mobile/tablet only — always open on desktop)
-  isOpen?: boolean;
-  onClose?: () => void;
+  // 📱 Mobile bottom sheet control (irrelevant on desktop — always a static column there)
+  sheetState?: SheetState;
+  setSheetState?: (state: SheetState) => void;
+
+  // 🛺 Tricycle zone visibility (mirrors the map's Layers panel, surfaced here for the mobile "Zones" tab)
+  visibleZoneIds?: string[];
+  onToggleZone?: (zoneId: string) => void;
+  setVisibleZoneIds?: (ids: string[]) => void;
 
   // 🚗 Alternative Paths Props (Driving, Walking, Motor)
   alternativeRoutes?: any[];
@@ -59,8 +82,12 @@ export default function Sidebar({
   onSelectPlace,
   onStartNavigation,
 
-  isOpen = true,
-  onClose,
+  sheetState = "half",
+  setSheetState,
+
+  visibleZoneIds = [],
+  onToggleZone,
+  setVisibleZoneIds,
 
   // Alternative paths (Walking, Motor, Driving)
   alternativeRoutes = [],
@@ -77,7 +104,87 @@ export default function Sidebar({
   activeTricycleIdx = 0,
   setActiveTricycleIdx,
 }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<"explore" | "routes">("explore");
+  const [activeTab, setActiveTab] = useState<"map" | "explore" | "routes" | "zones">("explore");
+
+  // Persistent bottom nav (mobile) — switching tabs should also exit any active
+  // routing view. "Map" is special: it explicitly asks to see just the map, so
+  // it collapses the sheet instead of pulling it open like the other tabs do.
+  const handleBottomTabPress = (tab: "map" | "explore" | "routes" | "zones") => {
+    if (isRoutingMode) onCloseRouting();
+    setActiveTab(tab);
+    if (!setSheetState) return;
+    if (tab === "map") setSheetState("peek");
+    else if (sheetState === "peek") setSheetState("half");
+  };
+
+  const allZonesVisible = tricycleZones.length > 0 && tricycleZones.every((z) => visibleZoneIds.includes(z.id));
+  const toggleAllZones = () => setVisibleZoneIds && setVisibleZoneIds(allZonesVisible ? [] : tricycleZones.map((z) => z.id));
+
+  // sheetState only has visual meaning below the `lg` breakpoint — on desktop the
+  // sidebar always renders full content regardless of its value (mirrors the old
+  // isOpen boolean, which was likewise inert on desktop).
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    setIsDesktop(mql.matches);
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  // When "Map" is active and the sheet is collapsed, hide the sheet entirely
+  // (no handle, no peek bar) so only the persistent bottom nav remains —
+  // the other tabs are the way back in.
+  const isMapOnly = activeTab === "map" && sheetState === "peek" && !isDesktop;
+
+  // Real viewport height, resolved post-mount (see SSR_FALLBACK_VH above).
+  const [viewportH, setViewportH] = useState(SSR_FALLBACK_VH);
+  useEffect(() => {
+    const update = () => setViewportH(window.innerHeight);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  // Live drag height (mobile bottom sheet) — non-null only while actively
+  // dragging the handle; overrides the snapped height with 1:1 finger tracking.
+  const [dragHeightPx, setDragHeightPx] = useState<number | null>(null);
+  const dragStartRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const liveDragHeightRef = useRef<number | null>(null); // mirrors dragHeightPx synchronously, so onUp isn't reading a stale closure
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!setSheetState) return;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragStartRef.current = { startY: e.clientY, startHeight: getSnapHeightPx(sheetState, viewportH) };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!dragStartRef.current) return;
+      const deltaY = dragStartRef.current.startY - ev.clientY; // dragging up = positive
+      const minH = getSnapHeightPx("peek", viewportH);
+      const maxH = getSnapHeightPx("full", viewportH);
+      const next = Math.min(maxH, Math.max(minH, dragStartRef.current.startHeight + deltaY));
+      liveDragHeightRef.current = next;
+      setDragHeightPx(next);
+    };
+
+    const onUp = () => {
+      const finalHeight = liveDragHeightRef.current ?? dragStartRef.current?.startHeight ?? getSnapHeightPx(sheetState, viewportH);
+      const candidates: SheetState[] = ["peek", "half", "full"];
+      const nearest = candidates.reduce((best, state) =>
+        Math.abs(getSnapHeightPx(state, viewportH) - finalHeight) < Math.abs(getSnapHeightPx(best, viewportH) - finalHeight) ? state : best
+      , "peek" as SheetState);
+
+      setSheetState(nearest);
+      setDragHeightPx(null);
+      liveDragHeightRef.current = null;
+      dragStartRef.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   // Get hex color for display mapping
   const getJeepneyHexColor = (colorName: string) => {
@@ -133,21 +240,72 @@ export default function Sidebar({
     : 0;
   const tricycleIsTransfer = activeTricyclePlan ? activeTricyclePlan.legs.length > 1 : false;
 
+  // Condensed one-line summary shown when the mobile sheet is collapsed to "peek"
+  // — the full header/tabs/content below would otherwise just get clipped.
+  const peekSummaryText = !isRoutingMode
+    ? "OlongaPunta — tap to explore"
+    : mode === "transit" && activeTransitPlan
+    ? `Transit • ₱${transitFareSum.toFixed(2)}`
+    : mode === "tricycle" && activeTricyclePlan
+    ? `Tricycle • ₱${tricycleFareSum.toFixed(2)}`
+    : activeDriveInfo
+    ? `${mode === "cycling" ? "Motor" : mode === "walking" ? "Walking" : "Driving"} • ${activeDriveInfo.durationMin}m`
+    : "Mapping your route...";
+
   return (
     <>
-      {/* Mobile-only backdrop — tap to dismiss the drawer */}
-      {isOpen && (
-        <div
-          onClick={onClose}
-          className="fixed inset-0 z-20 bg-gray-900/30 backdrop-blur-[1px] lg:hidden"
-        />
-      )}
+      {/* Persistent bottom nav (mobile only) — Google Maps-style: always visible,
+          switches which tab the sheet shows, regardless of sheet height. */}
+      <nav className="lg:hidden fixed inset-x-0 bottom-0 z-40 h-16 flex bg-white border-t border-gray-200 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
+        {(
+          [
+            { key: "map" as const, label: "Map", icon: "🗺️" },
+            { key: "explore" as const, label: "Explore", icon: "📍" },
+            { key: "routes" as const, label: "Jeepneys", icon: "🚐" },
+            { key: "zones" as const, label: "Zones", icon: "🛺" },
+          ]
+        ).map((tab) => {
+          const isActive = !isRoutingMode && activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => handleBottomTabPress(tab.key)}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-bold transition-colors ${
+                isActive ? "text-blue-600" : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              <span className="text-lg leading-none">{tab.icon}</span>
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
 
       <div
-        className={`fixed inset-y-0 left-0 z-30 flex h-full w-full max-w-sm flex-col bg-white text-gray-900 border-r border-gray-200 shadow-xl transition-transform duration-300 ease-in-out lg:static lg:z-20 lg:translate-x-0 lg:shadow-lg ${
-          isOpen ? "translate-x-0" : "-translate-x-full"
+        style={{
+          ["--sheet-h" as any]: `${dragHeightPx ?? (isMapOnly ? 0 : getSnapHeightPx(sheetState, viewportH))}px`,
+          transition: dragHeightPx !== null ? "none" : "height 250ms ease",
+        }}
+        className={`fixed inset-x-0 bottom-16 z-30 flex h-[var(--sheet-h)] w-full flex-col bg-white text-gray-900 overflow-hidden lg:static lg:inset-auto lg:bottom-auto lg:z-20 lg:h-full lg:w-96 lg:max-w-none lg:rounded-none lg:shadow-lg lg:border-t-0 lg:border-r ${
+          isMapOnly ? "" : "rounded-t-3xl shadow-2xl border-t border-gray-200"
         }`}
       >
+      {!isMapOnly && (
+      <>
+      {/* Drag handle (mobile only) — pointer-drag to resize between peek/half/full */}
+      <div
+        onPointerDown={handlePointerDown}
+        className="lg:hidden flex-shrink-0 flex flex-col items-center justify-center pt-2.5 pb-1.5 cursor-grab active:cursor-grabbing touch-none"
+      >
+        <div className="w-10 h-1.5 rounded-full bg-gray-300" />
+      </div>
+
+      {sheetState === "peek" && !isDesktop ? (
+        <div className="lg:hidden flex-1 flex items-center px-5 text-sm font-semibold text-gray-600 truncate">
+          {peekSummaryText}
+        </div>
+      ) : (
+      <div className="flex-1 flex flex-col min-h-0">
         {/* App Header */}
         <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <div>
@@ -163,7 +321,7 @@ export default function Sidebar({
               Olongapo City
             </div>
             <button
-              onClick={onClose}
+              onClick={() => setSheetState && setSheetState("peek")}
               className="lg:hidden p-1.5 hover:bg-gray-100 border border-gray-200 text-gray-500 hover:text-gray-900 rounded-lg transition-all"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -175,8 +333,8 @@ export default function Sidebar({
 
         {!isRoutingMode ? (
           <>
-            {/* Tabs */}
-            <div className="flex border-b border-gray-200 bg-gray-50/60">
+            {/* Tabs — desktop only; mobile switches tabs via the persistent bottom nav instead */}
+            <div className="hidden lg:flex border-b border-gray-200 bg-gray-50/60">
               <button
                 onClick={() => setActiveTab("explore")}
                 className={`flex-1 py-4 text-sm font-bold tracking-wide transition-all border-b-2 ${
@@ -242,7 +400,7 @@ export default function Sidebar({
                     ))
                   )}
                 </div>
-              ) : (
+              ) : activeTab === "routes" ? (
                 <div className="space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">
                     Interactive Route Index
@@ -306,6 +464,59 @@ export default function Sidebar({
                       </div>
                     );
                   })}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                      Tricycle Zones
+                    </h3>
+                    <button
+                      onClick={toggleAllZones}
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-700"
+                    >
+                      {allZonesVisible ? "Hide all" : "Show all"}
+                    </button>
+                  </div>
+                  {tricycleZones.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400 text-sm">
+                      No tricycle zones defined yet.
+                    </div>
+                  ) : (
+                    tricycleZones.map((zone) => {
+                      const isZoneVisible = visibleZoneIds.includes(zone.id);
+                      return (
+                        <div
+                          key={zone.id}
+                          onClick={() => onToggleZone && onToggleZone(zone.id)}
+                          className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${
+                            isZoneVisible
+                              ? "bg-white border-gray-200 shadow-sm"
+                              : "bg-gray-50 border-gray-100 opacity-60 hover:opacity-85"
+                          }`}
+                        >
+                          <div
+                            className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: zone.color, opacity: isZoneVisible ? 1 : 0.4 }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                {zone.code}
+                              </span>
+                              <span className="text-xs font-bold text-gray-500 truncate">{zone.name}</span>
+                            </div>
+                            <span className="text-[10px] text-gray-400 font-semibold mt-0.5 block">
+                              Base ₱{zone.baseFare.toFixed(2)} · ₱{zone.farePerKm.toFixed(2)}/km
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-gray-400 flex-shrink-0">
+                            {isZoneVisible ? "Shown" : "Hidden"}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               )}
             </div>
@@ -405,12 +616,12 @@ export default function Sidebar({
             </div>
 
             {/* Sub-mode selections (tab strip) */}
-            <div className="p-3 border-b border-gray-200 bg-white flex gap-1.5 overflow-x-auto scrollbar-hide">
+            <div className="p-2 sm:p-3 border-b border-gray-200 bg-white flex gap-1 sm:gap-1.5 overflow-x-auto scrollbar-hide">
               {(["driving", "walking", "cycling", "transit", "tricycle"] as TravelMode[]).map((m) => (
                 <button
                   key={m}
                   onClick={() => setMode(m)}
-                  className={`flex-1 min-w-[4.5rem] py-2 text-xs font-bold rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${
+                  className={`flex-1 min-w-[3.4rem] sm:min-w-[4.5rem] py-1.5 sm:py-2 px-1 text-[11px] sm:text-xs font-bold rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${
                     mode === m
                       ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20"
                       : "bg-gray-50 text-gray-500 border-gray-200 hover:text-gray-900 hover:bg-gray-100"
@@ -649,6 +860,10 @@ export default function Sidebar({
           </div>
         )}
       </div>
+      )}
+      </>
+      )}
+    </div>
     </>
   );
 }

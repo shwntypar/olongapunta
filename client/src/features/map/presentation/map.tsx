@@ -145,6 +145,10 @@ function parseAmenities(data: any) {
     .filter((place: any) => !isNaN(place.lat) && !isNaN(place.lon));
 }
 
+// Mobile bottom sheet snap points — peek (collapsed, map fully tappable),
+// half (default working height), full (nearly the whole screen).
+type SheetState = "peek" | "half" | "full";
+
 export default function MapComponent() {
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const [places, setPlaces] = useState<any[]>([]);
@@ -155,7 +159,9 @@ export default function MapComponent() {
   const isPickingOriginRef = useRef(false);
 
   const [isRoutingMode, setIsRoutingMode] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // Mobile bottom sheet snap state (Google Maps-style) — irrelevant on desktop,
+  // where the sidebar is always a static, fully-visible left column.
+  const [sheetState, setSheetState] = useState<SheetState>("half");
   const [isLayersPanelOpen, setIsLayersPanelOpen] = useState(false);
   const [travelMode, setTravelMode] = useState<TravelMode>('driving'); 
   const [routeInstructions, setRouteInstructions] = useState<any[]>([]);
@@ -189,9 +195,9 @@ export default function MapComponent() {
   
   const isRoutingModeRef = useRef(false);
   
-  // Default the sidebar to a collapsed drawer on phones/tablets so it doesn't block the map
+  // Default the bottom sheet to "peek" on phones/tablets so the map stays visible
   useEffect(() => {
-    if (window.innerWidth < 1024) setIsSidebarOpen(false);
+    if (window.innerWidth < 1024) setSheetState("peek");
   }, []);
 
   useEffect(() => {
@@ -365,25 +371,33 @@ export default function MapComponent() {
   // ==========================================
   // 🟢 LIVE GPS LOCATOR
   // ==========================================
+  // Sidebar is a full-width overlay on mobile (< lg), so it must get out of the
+  // way whenever the user needs to tap the map itself — otherwise there's no
+  // way to reach "click anywhere on the map to set your starting point".
+  const beginPickingOrigin = () => {
+    setIsPickingOrigin(true);
+    setSheetState("peek");
+  };
+
   const requestGpsLocation = async (destinationPlace: any) => {
     if (!navigator.geolocation) {
-      setIsPickingOrigin(true);
+      beginPickingOrigin();
       return;
     }
-  
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const coords: [number, number] = [position.coords.longitude, position.coords.latitude];
         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coords[1]}&lon=${coords[0]}&format=json`);
         const data = await res.json();
-        
+
         setOrigin({ name: data.display_name || "Current Location", coords });
         if (startMarkerRef.current) startMarkerRef.current.setLngLat(coords as any);
         handleRouteRequest(destinationPlace, travelMode, coords);
       },
       (error) => {
         console.warn("GPS failed, switching to manual pin mode:", error);
-        setIsPickingOrigin(true);
+        beginPickingOrigin();
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
@@ -392,13 +406,13 @@ export default function MapComponent() {
   const startNavigationFlow = (place: any) => {
     setSelectedPlace(place);
     setIsRoutingMode(true);
-    
+
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  
+
     if (isMobile) {
        requestGpsLocation(place);
     } else {
-       setIsPickingOrigin(true); 
+       beginPickingOrigin();
        alert("Since you are on a PC, please click your starting point on the map.");
     }
   };
@@ -1584,9 +1598,10 @@ export default function MapComponent() {
         name: `Dropped Pin (${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)})`,
         coords: newCoords
       });
-      
-      setIsPickingOrigin(false); 
-      
+
+      setIsPickingOrigin(false);
+      if (window.innerWidth < 1024) setSheetState("half"); // bring the sheet back up so results are visible
+
       if (startMarkerRef.current) {
         startMarkerRef.current.setLngLat(e.lngLat);
       }
@@ -1609,12 +1624,17 @@ export default function MapComponent() {
         routeInstructions={routeInstructions}
         visibleRouteIds={visibleRouteIds}
         isolatedDirectionId={isolatedDirectionId}
-        onSelectOriginMode={() => setIsPickingOrigin(true)}
+        onSelectOriginMode={beginPickingOrigin}
         onSelectRoute={selectSingleRoute}
 
-        // Responsive drawer control
-        isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
+        // Mobile bottom sheet control
+        sheetState={sheetState}
+        setSheetState={setSheetState}
+
+        // Tricycle zone visibility (mobile "Zones" tab mirrors the Layers panel)
+        visibleZoneIds={visibleZoneIds}
+        onToggleZone={toggleZone}
+        setVisibleZoneIds={setVisibleZoneIds}
 
         // Alternative modality states
         alternativeRoutes={alternativeRoutes}
@@ -1704,16 +1724,6 @@ export default function MapComponent() {
       <div className="relative flex-1 h-full">
 
         <div className="absolute top-4 left-4 right-4 z-10 flex justify-between gap-2">
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="lg:hidden flex-shrink-0 bg-white rounded-full shadow-md w-10 h-10 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:shadow-lg transition-all"
-            title="Open menu"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-
           <div className="bg-white rounded-full shadow-md px-4 py-2 flex items-center flex-1 min-w-0 sm:flex-none sm:w-64 md:w-80">
             <svg className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
