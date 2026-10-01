@@ -1,5 +1,6 @@
 import * as turf from '@turf/turf';
 import { tricycleZones, TricycleZone } from '../domain/TricycleZoneData';
+import { findNearestRoadPoint } from './zoneRoadGraph';
 
 // =====================================================
 // 🛺 TRICYCLE ZONE ROUTING ENGINE
@@ -74,6 +75,18 @@ const nearestBoundaryPoint = (coords: number[], zone: TricycleZone) => {
   return { coords: bestCoords as number[], distanceKm: bestDist };
 };
 
+// Prefer meeting the rider on an actual street: snap onto the zone's real
+// (OSM-sourced) road network first, and only fall back to the nearest point
+// on the hand-drawn zone polygon boundary when that road data isn't
+// available (Overpass unreachable, zone has no mapped roads, etc.) — the
+// boundary line is just the shape the zone was drawn with, not necessarily
+// a walkable street.
+const nearestWalkablePoint = async (coords: number[], zone: TricycleZone) => {
+  const roadPoint = await findNearestRoadPoint(zone, coords);
+  if (roadPoint) return roadPoint;
+  return nearestBoundaryPoint(coords, zone);
+};
+
 // Closest pair of (inset) boundary points between two zones — the handoff
 // point for a cross-zone transfer (near-zero distance when the zones actually border).
 const nearestZoneBoundaryPair = (zoneA: TricycleZone, zoneB: TricycleZone) => {
@@ -113,7 +126,7 @@ const candidateKey = (plan: { legs: TricycleLeg[] }) =>
  * deduplicated by zone combination, capped to the top 3 — mirroring
  * findTransitRouteCandidates so both modes offer the same "alternatives" UX.
  */
-export const findTricycleRouteCandidates = (originCoords: number[], destCoords: number[]): TricyclePlan[] => {
+export const findTricycleRouteCandidates = async (originCoords: number[], destCoords: number[]): Promise<TricyclePlan[]> => {
   if (tricycleZones.length === 0) return [];
 
   const originZones = zonesContaining(originCoords);
@@ -152,21 +165,21 @@ export const findTricycleRouteCandidates = (originCoords: number[], destCoords: 
   }
 
   // Case 3: only the destination is inside a zone(s) — walk to the nearest
-  // entry point, ride from there. One candidate per candidate zone.
+  // *walkable* entry point, ride from there. One candidate per candidate zone.
   if (candidates.length === 0 && destZones.length > 0) {
     for (const zone of destZones) {
-      const entry = nearestBoundaryPoint(originCoords, zone);
+      const entry = await nearestWalkablePoint(originCoords, zone);
       if (entry.distanceKm > MAX_WALK_TO_ZONE_KM) continue;
       const score = entry.distanceKm * 3 + turf.distance(turf.point(entry.coords), turf.point(destCoords));
       candidates.push({ legs: [{ zone, pickupCoords: entry.coords, dropoffCoords: destCoords }], score });
     }
   }
 
-  // Case 4: only the origin is inside a zone(s) — ride to the nearest exit
-  // point, walk the rest of the way. One candidate per candidate zone.
+  // Case 4: only the origin is inside a zone(s) — ride to the nearest
+  // *walkable* exit point, walk the rest of the way. One candidate per candidate zone.
   if (candidates.length === 0 && originZones.length > 0) {
     for (const zone of originZones) {
-      const exit = nearestBoundaryPoint(destCoords, zone);
+      const exit = await nearestWalkablePoint(destCoords, zone);
       if (exit.distanceKm > MAX_WALK_TO_ZONE_KM) continue;
       const score = turf.distance(turf.point(originCoords), turf.point(exit.coords)) + exit.distanceKm * 3;
       candidates.push({ legs: [{ zone, pickupCoords: originCoords, dropoffCoords: exit.coords }], score });

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:martins-graph": "bun run scripts/build-martins-graph.ts"
   },
   "dependencies": {
     "@tanstack/react-form": "^1.29.1",

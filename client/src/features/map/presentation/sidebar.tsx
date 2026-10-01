@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { mockRoutes } from "../domain/MockData";
 import { tricycleZones } from "../domain/TricycleZoneData";
 
-export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle";
+export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle" | "martins";
 
 interface SidebarProps {
   places: any[];
@@ -41,6 +41,12 @@ interface SidebarProps {
   tricycleCandidates?: any[];
   activeTricycleIdx?: number;
   setActiveTricycleIdx?: (idx: number) => void;
+  isTricycleLoading?: boolean;
+
+  // 🧭 Martins (Pareto, experimental) Candidate Props
+  martinsRoutes?: any[];
+  activeMartinsIdx?: number;
+  setActiveMartinsIdx?: (idx: number) => void;
 }
 
 export default function Sidebar({
@@ -76,8 +82,22 @@ export default function Sidebar({
   tricycleCandidates = [],
   activeTricycleIdx = 0,
   setActiveTricycleIdx,
+  isTricycleLoading = false,
+
+  // Martins (Pareto, experimental) candidates list
+  martinsRoutes = [],
+  activeMartinsIdx = 0,
+  setActiveMartinsIdx,
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<"explore" | "routes">("explore");
+
+  // Nearby places now live in the mobile bottom sheet (Google Maps-style),
+  // so the drawer on small screens should open straight into Jeepney Routes.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setActiveTab("routes");
+    }
+  }, []);
 
   // Get hex color for display mapping
   const getJeepneyHexColor = (colorName: string) => {
@@ -96,6 +116,12 @@ export default function Sidebar({
 
   // Estimate Fare for Jeepney or Tricycle instructions
   const estimateFare = (instructionText: string) => {
+    // An explicit peso amount in the instruction (e.g. Martins' Pareto routes,
+    // which already know their real fare) always wins over guessing from a
+    // route code.
+    const explicit = instructionText.match(/₱(\d+(?:\.\d+)?)/);
+    if (explicit) return `₱${parseFloat(explicit[1]).toFixed(2)}`;
+
     const match = instructionText.match(/Ride the ([\w-]+)/);
     if (!match) return null;
     const code = match[1];
@@ -179,7 +205,7 @@ export default function Sidebar({
             <div className="flex border-b border-gray-200 bg-gray-50/60">
               <button
                 onClick={() => setActiveTab("explore")}
-                className={`flex-1 py-4 text-sm font-bold tracking-wide transition-all border-b-2 ${
+                className={`hidden lg:block flex-1 py-4 text-sm font-bold tracking-wide transition-all border-b-2 ${
                   activeTab === "explore"
                     ? "border-blue-600 text-blue-600 bg-white"
                     : "border-transparent text-gray-400 hover:text-gray-700"
@@ -406,17 +432,20 @@ export default function Sidebar({
 
             {/* Sub-mode selections (tab strip) */}
             <div className="p-3 border-b border-gray-200 bg-white flex gap-1.5 overflow-x-auto scrollbar-hide">
-              {(["driving", "walking", "cycling", "transit", "tricycle"] as TravelMode[]).map((m) => (
+              {(["driving", "walking", "cycling", "transit", "tricycle", "martins"] as TravelMode[]).map((m) => (
                 <button
                   key={m}
                   onClick={() => setMode(m)}
                   className={`flex-1 min-w-[4.5rem] py-2 text-xs font-bold rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${
                     mode === m
-                      ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20"
+                      ? m === "martins"
+                        ? "bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-600/20"
+                        : "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20"
                       : "bg-gray-50 text-gray-500 border-gray-200 hover:text-gray-900 hover:bg-gray-100"
                   }`}
+                  title={m === "martins" ? "Experimental: Pareto-optimal time-vs-fare routing" : undefined}
                 >
-                  <span className="capitalize">{m === "cycling" ? "motor" : m}</span>
+                  <span className="capitalize">{m === "cycling" ? "motor" : m === "martins" ? "Pareto 🧪" : m}</span>
                 </button>
               ))}
             </div>
@@ -534,12 +563,57 @@ export default function Sidebar({
               </div>
             )}
 
+            {/* =============================================
+                🧭 MARTINS (PARETO) ROUTE SELECTOR — EXPERIMENTAL
+               ============================================= */}
+            {mode === "martins" && martinsRoutes.length > 0 && (
+              <div className="p-4 bg-violet-50/60 border-b border-gray-200">
+                <span className="text-[10px] font-black text-violet-400 uppercase tracking-wider block mb-2.5">
+                  Pareto Routes (Time vs Fare) — Experimental
+                </span>
+                <div className="space-y-1.5">
+                  {martinsRoutes.map((route, index) => {
+                    const isSelected = index === activeMartinsIdx;
+                    const label =
+                      martinsRoutes.length === 1
+                        ? "Only option"
+                        : index === 0
+                        ? "Fastest"
+                        : index === martinsRoutes.length - 1
+                        ? "Cheapest"
+                        : "Balanced";
+
+                    return (
+                      <button
+                        key={index}
+                        onClick={() => setActiveMartinsIdx && setActiveMartinsIdx(index)}
+                        className={`w-full text-left p-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-all ${
+                          isSelected
+                            ? "bg-violet-50 border-violet-400 text-violet-700 font-bold"
+                            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        <span>{label}</span>
+                        <span>
+                          {route.cost[0].toFixed(1)} min • ₱{route.cost[1]}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Turn-by-Turn Instruction List */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4 scrollbar-thin scrollbar-thumb-gray-300">
               {routeInstructions.length === 0 ? (
-                mode === "tricycle" && tricycleCandidates.length === 0 ? (
+                mode === "tricycle" && tricycleCandidates.length === 0 && !isTricycleLoading ? (
                   <div className="text-center py-12 text-gray-400 text-sm">
                     🛺 No tricycle zone covers this trip yet.
+                  </div>
+                ) : mode === "martins" && martinsRoutes.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400 text-sm">
+                    🧭 No Pareto route found — origin or destination may be too far from the mapped road graph.
                   </div>
                 ) : (
                   <div className="text-center py-12 text-gray-400 text-sm animate-pulse">

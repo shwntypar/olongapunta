@@ -22,8 +22,9 @@ export const getDistanceMeters = (coord1: number[], coord2: number[]) => {
 // 🗺️ MAPBOX ROAD-SNAPPING
 // =====================================================
 
-export const fetchExactJeepneyPath = async (pathCoordinates: number[][]) => {
+export const fetchExactJeepneyPath = async (pathCoordinates: number[][], label?: string) => {
   if (!pathCoordinates || pathCoordinates.length < 2) return null;
+  const tag = label ? `[${label}] ` : "";
 
   try {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -32,19 +33,30 @@ export const fetchExactJeepneyPath = async (pathCoordinates: number[][]) => {
       .map(coord => `${coord[0]},${coord[1]}`)
       .join(';');
 
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinateString}?alternatives=false&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`;
-    
+    // continue_straight=false lets Mapbox double back at a waypoint — jeepney paths
+    // routinely loop/U-turn at terminals, and forcing straight-through travel there
+    // makes Mapbox reject the whole request, silently falling back to the raw
+    // hand-drawn (road-cutting) coordinates for that route.
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinateString}?alternatives=false&continue_straight=false&geometries=geojson&overview=full&access_token=${token}`;
+
     const response = await fetch(url);
 
     if (!response.ok) {
-      console.warn("Mapbox rejected the full route. Falling back to straight lines.");
-      return null; 
+      console.warn(`${tag}Mapbox request failed (HTTP ${response.status}). Falling back to straight lines.`);
+      return null;
     }
 
-    return await response.json();
-    
+    const data = await response.json();
+
+    if (data.code !== "Ok") {
+      console.warn(`${tag}Mapbox could not snap this path (code: ${data.code}). Falling back to straight lines.`, data.message);
+      return null;
+    }
+
+    return data;
+
   } catch (error) {
-    console.error("Error fetching exact jeepney path:", error);
+    console.error(`${tag}Error fetching exact jeepney path:`, error);
     return null;
   }
 };
