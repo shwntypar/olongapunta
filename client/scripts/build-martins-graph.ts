@@ -19,9 +19,14 @@
 
 import * as turf from "@turf/turf";
 import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tricycleZones } from "../src/features/map/domain/TricycleZoneData";
 import type { MartinsEdge, MartinsGraph, MartinsNode } from "../src/features/map/application/martins/types";
+
+// import.meta.dir is Bun-only; import.meta.url is standard and works the
+// same under both Bun and this project's own (Next.js/tsc) type-checking.
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const OVERPASS_INTERPRETER_URLS = [
   "https://overpass-api.de/api/interpreter",
@@ -191,7 +196,7 @@ async function main() {
   const inZoneNodes = graph.nodes.filter((n) => n.zoneId).length;
   console.log(`Nodes inside a zone: ${inZoneNodes} / ${graph.nodes.length}`);
 
-  const outPath = resolve(import.meta.dir, "../src/features/map/application/martins/graph.json");
+  const outPath = resolve(__dirname, "../src/features/map/application/martins/graph.json");
   writeFileSync(outPath, JSON.stringify(graph));
   console.log(`Wrote ${outPath}`);
 }
