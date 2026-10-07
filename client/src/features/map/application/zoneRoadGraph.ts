@@ -16,9 +16,13 @@ import rawMartinsGraph from './martins/graph.json';
 // for amenities), restricted to non-arterial highway classes so tricycles
 // stay off avenues by construction, not just by scoring preference.
 
+// weight is the cost Dijkstra actually searches on — equal to distKm for a
+// normal road, but inflated for a main road so it's only ever used to bridge
+// a gap nothing else can cross, not preferred outright. distKm stays the
+// real distance so the final route's reported length isn't inflated too.
 interface ZoneGraph {
   coords: Map<string, number[]>; // node key -> [lon, lat]
-  adjacency: Map<string, { to: string; distKm: number }[]>;
+  adjacency: Map<string, { to: string; distKm: number; weight: number }[]>;
   ways: { nodeIds: string[]; lineCoords: number[][] }[]; // kept for snapping arbitrary points
 }
 
@@ -27,13 +31,21 @@ export interface ZoneRouteResult {
   distanceMeters: number;
 }
 
+// How much a main-road edge's search cost is inflated by. High enough that
+// Dijkstra always prefers any all-local-streets detour over it, but finite —
+// unlike a hard exclusion, a main road stays usable as a last-resort bridge
+// when it's genuinely the only thing connecting two parts of a zone, instead
+// of the whole route falling back to Mapbox's unconstrained router.
+const MAIN_ROAD_PENALTY = 8;
+
 const graphCache = new Map<string, Promise<ZoneGraph | null>>();
 
-const addEdge = (adjacency: ZoneGraph['adjacency'], a: string, b: string, distKm: number) => {
+const addEdge = (adjacency: ZoneGraph['adjacency'], a: string, b: string, distKm: number, isMainRoad = false) => {
+  const weight = isMainRoad ? distKm * MAIN_ROAD_PENALTY : distKm;
   if (!adjacency.has(a)) adjacency.set(a, []);
   if (!adjacency.has(b)) adjacency.set(b, []);
-  adjacency.get(a)!.push({ to: b, distKm });
-  adjacency.get(b)!.push({ to: a, distKm }); // roads treated as two-way — no consistent one-way data at this scale
+  adjacency.get(a)!.push({ to: b, distKm, weight });
+  adjacency.get(b)!.push({ to: a, distKm, weight }); // roads treated as two-way — no consistent one-way data at this scale
 };
 
 interface PrecomputedEdge {
@@ -72,7 +84,6 @@ const buildGraphFromPrecomputed = (zone: TricycleZone): ZoneGraph | null => {
   const ways: ZoneGraph['ways'] = [];
 
   for (const edge of graph.edges) {
-    if (edge.isMainRoad) continue; // match the live-fetch query, which never pulls these classes in the first place
     if (edge.coordinates.length < 2) continue;
 
     const [a, b] = edge.coordinates;
@@ -84,7 +95,14 @@ const buildGraphFromPrecomputed = (zone: TricycleZone): ZoneGraph | null => {
     }
     if (!insideZone) continue;
 
-    addEdge(adjacency, edge.from, edge.to, edge.distanceKm);
+    // Main roads are included (not dropped) — heavily penalized below so a
+    // real local-streets path is always preferred when one exists, but
+    // still usable when it's the only thing connecting two parts of the
+    // zone. Dropping them outright can fragment a zone's street graph into
+    // disconnected islands, which previously meant falling all the way back
+    // to Mapbox's unconstrained router — the very outcome this was meant to
+    // prevent.
+    addEdge(adjacency, edge.from, edge.to, edge.distanceKm, edge.isMainRoad);
     coords.set(edge.from, a);
     coords.set(edge.to, b);
     ways.push({ nodeIds: [edge.from, edge.to], lineCoords: [a, b] });
@@ -237,32 +255,35 @@ const snapToGraph = (graph: ZoneGraph, point: number[]): string | null => {
 };
 
 // Plain-array Dijkstra — zone graphs are small (one neighborhood's worth of
-// roads), so a proper heap isn't worth the extra code here.
+// roads), so a proper heap isn't worth the extra code here. Searches on
+// `weight` (main roads inflated) but the returned distKm is the real
+// distance along the winning path, so a penalized-but-used main-road edge
+// doesn't also inflate the reported ride length.
 const dijkstra = (graph: ZoneGraph, startKey: string, endKey: string): { path: string[]; distKm: number } | null => {
-  const dist = new Map<string, number>([[startKey, 0]]);
+  const cost = new Map<string, number>([[startKey, 0]]);
   const prev = new Map<string, string>();
   const visited = new Set<string>();
   const queue: string[] = [startKey];
 
   while (queue.length > 0) {
-    queue.sort((a, b) => (dist.get(a) ?? Infinity) - (dist.get(b) ?? Infinity));
+    queue.sort((a, b) => (cost.get(a) ?? Infinity) - (cost.get(b) ?? Infinity));
     const current = queue.shift()!;
     if (visited.has(current)) continue;
     visited.add(current);
     if (current === endKey) break;
 
-    for (const { to, distKm } of graph.adjacency.get(current) || []) {
+    for (const { to, weight } of graph.adjacency.get(current) || []) {
       if (visited.has(to)) continue;
-      const candidateDist = (dist.get(current) ?? Infinity) + distKm;
-      if (candidateDist < (dist.get(to) ?? Infinity)) {
-        dist.set(to, candidateDist);
+      const candidateCost = (cost.get(current) ?? Infinity) + weight;
+      if (candidateCost < (cost.get(to) ?? Infinity)) {
+        cost.set(to, candidateCost);
         prev.set(to, current);
         queue.push(to);
       }
     }
   }
 
-  if (!dist.has(endKey)) return null;
+  if (!cost.has(endKey)) return null;
 
   const path: string[] = [endKey];
   let node = endKey;
@@ -273,7 +294,13 @@ const dijkstra = (graph: ZoneGraph, startKey: string, endKey: string): { path: s
     node = p;
   }
 
-  return { path, distKm: dist.get(endKey)! };
+  let distKm = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const edge = graph.adjacency.get(path[i])?.find((e) => e.to === path[i + 1]);
+    distKm += edge?.distKm ?? 0;
+  }
+
+  return { path, distKm };
 };
 
 /**

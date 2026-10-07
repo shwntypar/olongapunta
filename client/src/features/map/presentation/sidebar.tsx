@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { mockRoutes } from "../domain/MockData";
 import { tricycleZones } from "../domain/TricycleZoneData";
 
-export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle" | "martins";
+export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle";
 
 interface SidebarProps {
   places: any[];
@@ -37,13 +37,7 @@ interface SidebarProps {
   activeTransitIdx?: number;
   setActiveTransitIdx?: (idx: number) => void;
 
-  // 🛺 Tricycle Zone Candidate Props (Alternatives)
-  tricycleCandidates?: any[];
-  activeTricycleIdx?: number;
-  setActiveTricycleIdx?: (idx: number) => void;
-  isTricycleLoading?: boolean;
-
-  // 🧭 Martins (Pareto, experimental) Candidate Props
+  // 🛺🧭 Tricycle Candidate Props (Martins' Pareto routes)
   martinsRoutes?: any[];
   activeMartinsIdx?: number;
   setActiveMartinsIdx?: (idx: number) => void;
@@ -78,13 +72,7 @@ export default function Sidebar({
   activeTransitIdx = 0,
   setActiveTransitIdx,
 
-  // Tricycle zone candidates list
-  tricycleCandidates = [],
-  activeTricycleIdx = 0,
-  setActiveTricycleIdx,
-  isTricycleLoading = false,
-
-  // Martins (Pareto, experimental) candidates list
+  // Tricycle candidates list (Martins' Pareto routes)
   martinsRoutes = [],
   activeMartinsIdx = 0,
   setActiveMartinsIdx,
@@ -152,12 +140,15 @@ export default function Sidebar({
       : activeTransitPlan.jeepney.baseFare
     : 13.0;
 
-  // Extract fare/transfer info from the active tricycle zone candidate
-  const activeTricyclePlan = tricycleCandidates[activeTricycleIdx];
-  const tricycleFareSum = activeTricyclePlan
-    ? activeTricyclePlan.legs.reduce((sum: number, leg: any) => sum + leg.zone.baseFare, 0)
+  // Extract fare/crossing info from the active tricycle (Martins Pareto) route
+  const activeMartinsRoute = martinsRoutes[activeMartinsIdx];
+  const tricycleFareSum = activeMartinsRoute ? activeMartinsRoute.cost[1] : 0;
+  const tricycleCrossesZone = activeMartinsRoute
+    ? activeMartinsRoute.legs.some((leg: any) => leg.transition === "trike-cross")
+    : false;
+  const tricycleBoardCount = activeMartinsRoute
+    ? activeMartinsRoute.legs.filter((leg: any) => leg.transition === "board-trike").length
     : 0;
-  const tricycleIsTransfer = activeTricyclePlan ? activeTricyclePlan.legs.length > 1 : false;
 
   return (
     <>
@@ -174,30 +165,34 @@ export default function Sidebar({
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* App Header */}
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-black bg-gradient-to-r from-blue-600 via-violet-600 to-pink-600 bg-clip-text text-transparent tracking-tight">
-              OlongaPunta
-            </h1>
-            <p className="text-xs text-gray-400 font-semibold tracking-widest uppercase mt-0.5">
-              Transit & Explore
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="bg-gray-100 px-3 py-1 rounded-full text-xs font-bold text-gray-600 border border-gray-200">
-              Olongapo City
+        {/* App Header — hidden while routing: the Directions card below has
+            its own header/close action, and stacking both wastes vertical
+            space mobile viewports can't spare. */}
+        {!isRoutingMode && (
+          <div className="p-4 lg:p-6 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <h1 className="text-xl lg:text-2xl font-black bg-gradient-to-r from-blue-600 via-violet-600 to-pink-600 bg-clip-text text-transparent tracking-tight">
+                OlongaPunta
+              </h1>
+              <p className="text-[11px] lg:text-xs text-gray-400 font-semibold tracking-widest uppercase mt-0.5">
+                Transit & Explore
+              </p>
             </div>
-            <button
-              onClick={onClose}
-              className="lg:hidden p-1.5 hover:bg-gray-100 border border-gray-200 text-gray-500 hover:text-gray-900 rounded-lg transition-all"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="bg-gray-100 px-3 py-1 rounded-full text-xs font-bold text-gray-600 border border-gray-200">
+                Olongapo City
+              </div>
+              <button
+                onClick={onClose}
+                className="lg:hidden p-1.5 hover:bg-gray-100 border border-gray-200 text-gray-500 hover:text-gray-900 rounded-lg transition-all"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {!isRoutingMode ? (
           <>
@@ -341,20 +336,20 @@ export default function Sidebar({
           <div className="flex-1 flex flex-col min-h-0 bg-white">
 
             {/* Header destinations */}
-            <div className="p-5 border-b border-gray-200 flex items-start justify-between">
+            <div className="p-4 border-b border-gray-200 flex items-start justify-between">
               <div className="min-w-0 pr-4">
                 <span className="text-[10px] uppercase font-extrabold tracking-widest text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-0.5 rounded-full">
                   Directions
                 </span>
-                <div className="mt-2.5 space-y-1.5 text-sm">
+                <div className="mt-2 space-y-1 text-sm">
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-400 w-12 flex-shrink-0">From:</span>
+                    <span className="text-gray-400 w-10 flex-shrink-0">From:</span>
                     <span className="font-semibold text-gray-800 truncate">
                       {origin?.name || "Select starting point..."}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-400 w-12 flex-shrink-0">To:</span>
+                    <span className="text-gray-400 w-10 flex-shrink-0">To:</span>
                     <span className="font-semibold text-gray-800 truncate">
                       {destination?.name || "Unnamed"}
                     </span>
@@ -374,7 +369,7 @@ export default function Sidebar({
             {/* =============================================
                 ⚡ MULTI-MODAL COMPARISON METRICS CARD
                ============================================= */}
-            <div className="p-4 bg-gray-50/70 border-b border-gray-200 grid grid-cols-2 gap-2">
+            <div className="p-3 bg-gray-50/70 border-b border-gray-200 grid grid-cols-2 gap-2">
 
               {/* Transit summary card */}
               <div
@@ -430,31 +425,44 @@ export default function Sidebar({
 
             </div>
 
-            {/* Sub-mode selections (tab strip) */}
-            <div className="p-3 border-b border-gray-200 bg-white flex gap-1.5 overflow-x-auto scrollbar-hide">
-              {(["driving", "walking", "cycling", "transit", "tricycle", "martins"] as TravelMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={`flex-1 min-w-[4.5rem] py-2 text-xs font-bold rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${
-                    mode === m
-                      ? m === "martins"
-                        ? "bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-600/20"
-                        : "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20"
-                      : "bg-gray-50 text-gray-500 border-gray-200 hover:text-gray-900 hover:bg-gray-100"
-                  }`}
-                  title={m === "martins" ? "Experimental: Pareto-optimal time-vs-fare routing" : undefined}
+            {/* Sub-mode selections (tab strip) — grid, not flex+min-width,
+                so all tabs always fit the sidebar's width instead of
+                overflowing and getting cut off at the edge. A destination
+                can opt out of specific modes (e.g. a tricycle boarding spot
+                excludes Tricycle — routing a trike trip to its own stand
+                isn't a meaningful option) via destination.excludeModes. */}
+            {(() => {
+              const excludedModes: TravelMode[] = destination?.excludeModes ?? [];
+              const availableModes = (["driving", "walking", "cycling", "transit", "tricycle"] as TravelMode[]).filter(
+                (m) => !excludedModes.includes(m)
+              );
+              return (
+                <div
+                  className="p-3 border-b border-gray-200 bg-white grid gap-1"
+                  style={{ gridTemplateColumns: `repeat(${availableModes.length}, minmax(0, 1fr))` }}
                 >
-                  <span className="capitalize">{m === "cycling" ? "motor" : m === "martins" ? "Pareto 🧪" : m}</span>
-                </button>
-              ))}
-            </div>
+                  {availableModes.map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setMode(m)}
+                      className={`py-2 px-0.5 text-[10px] leading-tight font-bold rounded-lg border transition-all flex flex-col items-center justify-center gap-1 ${
+                        mode === m
+                          ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20"
+                          : "bg-gray-50 text-gray-500 border-gray-200 hover:text-gray-900 hover:bg-gray-100"
+                      }`}
+                    >
+                      <span className="capitalize text-center">{m === "cycling" ? "motor" : m}</span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* =============================================
                 ⚡ JEEPNEY TRANSIT ALTERNATIVES SELECTOR
                ============================================= */}
             {mode === "transit" && transitCandidates.length > 1 && (
-              <div className="p-4 bg-gray-50/60 border-b border-gray-200">
+              <div className="p-3 bg-gray-50/60 border-b border-gray-200">
                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block mb-2.5">
                   Alternative Jeepney Transfers
                 </span>
@@ -493,7 +501,7 @@ export default function Sidebar({
                 ⚡ GENERAL ALTERNATIVE ROUTE SELECTOR (Driving, Walking, Motor)
                ============================================= */}
             {mode !== "transit" && alternativeRoutes.length > 1 && (
-              <div className="p-4 bg-gray-50/60 border-b border-gray-200">
+              <div className="p-3 bg-gray-50/60 border-b border-gray-200">
                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block mb-2.5">
                   Alternate Routes Available
                 </span>
@@ -527,61 +535,20 @@ export default function Sidebar({
             )}
 
             {/* =============================================
-                ⚡ TRICYCLE ZONE ALTERNATIVES SELECTOR
+                🧭 TRICYCLE: MARTINS PARETO ROUTE SELECTOR
                ============================================= */}
-            {mode === "tricycle" && tricycleCandidates.length > 1 && (
-              <div className="p-4 bg-gray-50/60 border-b border-gray-200">
-                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block mb-2.5">
-                  Alternative Tricycle Options
-                </span>
-                <div className="space-y-1.5">
-                  {tricycleCandidates.map((candidate, index) => {
-                    const isSelected = index === activeTricycleIdx;
-                    const candidateFare = candidate.legs.reduce((sum: number, leg: any) => sum + leg.zone.baseFare, 0);
-
-                    return (
-                      <button
-                        key={index}
-                        onClick={() => setActiveTricycleIdx && setActiveTricycleIdx(index)}
-                        className={`w-full text-left p-2.5 rounded-lg border text-xs font-semibold flex items-center justify-between transition-all ${
-                          isSelected
-                            ? "bg-blue-50 border-blue-400 text-blue-700 font-bold"
-                            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        <span className="truncate flex items-center gap-1">
-                          {candidate.legs[0].zone.code}
-                          {candidate.legs.length === 2 && ` ➔ ${candidate.legs[1].zone.code}`}
-                        </span>
-                        <span>
-                          ₱{candidateFare.toFixed(2)} • {candidate.legs.length === 2 ? "1 Transfer" : "Direct"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* =============================================
-                🧭 MARTINS (PARETO) ROUTE SELECTOR — EXPERIMENTAL
-               ============================================= */}
-            {mode === "martins" && martinsRoutes.length > 0 && (
-              <div className="p-4 bg-violet-50/60 border-b border-gray-200">
+            {mode === "tricycle" && martinsRoutes.length > 0 && (
+              <div className="p-3 bg-violet-50/60 border-b border-gray-200">
                 <span className="text-[10px] font-black text-violet-400 uppercase tracking-wider block mb-2.5">
-                  Pareto Routes (Time vs Fare) — Experimental
+                  Tricycle Options
                 </span>
                 <div className="space-y-1.5">
                   {martinsRoutes.map((route, index) => {
                     const isSelected = index === activeMartinsIdx;
-                    const label =
-                      martinsRoutes.length === 1
-                        ? "Only option"
-                        : index === 0
-                        ? "Fastest"
-                        : index === martinsRoutes.length - 1
-                        ? "Cheapest"
-                        : "Balanced";
+                    const boardCount = route.legs.filter((leg: any) => leg.transition === "board-trike").length;
+                    // Same Direct/Transfer framing as Transit mode — never
+                    // "Cheapest"/"Balanced", those aren't shown here anymore.
+                    const label = boardCount >= 2 ? "Transfer" : "Direct";
 
                     return (
                       <button
@@ -595,7 +562,7 @@ export default function Sidebar({
                       >
                         <span>{label}</span>
                         <span>
-                          {route.cost[0].toFixed(1)} min • ₱{route.cost[1]}
+                          {route.cost[0].toFixed(1)} min • ₱{route.cost[1].toFixed(2)}
                         </span>
                       </button>
                     );
@@ -605,15 +572,11 @@ export default function Sidebar({
             )}
 
             {/* Turn-by-Turn Instruction List */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4 scrollbar-thin scrollbar-thumb-gray-300">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-gray-300">
               {routeInstructions.length === 0 ? (
-                mode === "tricycle" && tricycleCandidates.length === 0 && !isTricycleLoading ? (
+                mode === "tricycle" && martinsRoutes.length === 0 ? (
                   <div className="text-center py-12 text-gray-400 text-sm">
                     🛺 No tricycle zone covers this trip yet.
-                  </div>
-                ) : mode === "martins" && martinsRoutes.length === 0 ? (
-                  <div className="text-center py-12 text-gray-400 text-sm">
-                    🧭 No Pareto route found — origin or destination may be too far from the mapped road graph.
                   </div>
                 ) : (
                   <div className="text-center py-12 text-gray-400 text-sm animate-pulse">
@@ -687,7 +650,7 @@ export default function Sidebar({
 
             {/* Fare Summary at the bottom */}
             {mode === "transit" && routeInstructions.length > 0 && (
-              <div className="p-4 border-t border-gray-200 bg-emerald-50/60 flex items-center justify-between">
+              <div className="p-3 border-t border-gray-200 bg-emerald-50/60 flex items-center justify-between gap-2">
                 <div>
                   <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">
                     Est. Total Fare
@@ -696,25 +659,25 @@ export default function Sidebar({
                     ₱{transitFareSum.toFixed(2)}
                   </span>
                 </div>
-                <div className="bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-gray-600 shadow-sm">
+                <div className="bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-gray-600 shadow-sm flex-shrink-0">
                   Ref: {activeTransitPlan?.transfer ? "1 Transfer" : "Direct Ride"}
                 </div>
               </div>
             )}
 
             {mode === "tricycle" && routeInstructions.length > 0 && (
-              <div className="p-4 border-t border-gray-200 bg-emerald-50/60 flex items-center justify-between">
+              <div className="p-3 border-t border-gray-200 bg-emerald-50/60 flex items-center justify-between gap-2">
                 <div>
                   <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">
                     Est. Total Fare
                   </span>
                   <span className="text-xl font-black text-emerald-600">
-                    {activeTricyclePlan ? `₱${tricycleFareSum.toFixed(2)}` : "Not available"}
+                    {activeMartinsRoute ? `₱${tricycleFareSum.toFixed(2)}` : "Not available"}
                   </span>
                 </div>
-                {activeTricyclePlan && (
-                  <div className="bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-gray-600 shadow-sm">
-                    Ref: {tricycleIsTransfer ? "1 Transfer" : "Direct Ride"}
+                {activeMartinsRoute && (
+                  <div className="bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-gray-600 shadow-sm flex-shrink-0">
+                    Ref: {tricycleBoardCount >= 2 ? "1 Transfer" : tricycleCrossesZone ? "Crosses Zone" : "Within Zone"}
                   </div>
                 )}
               </div>

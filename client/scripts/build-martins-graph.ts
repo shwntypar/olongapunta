@@ -43,6 +43,17 @@ const BBOX_PADDING_DEG = 0.006; // ≈ 650m at this latitude
 
 const TRIKE_SPEED_KMH = 20; // placeholder — tune with field data
 const MAIN_ROAD_HIGHWAY_CLASSES = ["trunk", "primary", "trunk_link", "primary_link"];
+// Through-roads where tricycles realistically stand/queue for passengers —
+// broader than MAIN_ROAD_HIGHWAY_CLASSES, which is only used for the
+// "prefer to avoid" routing penalty. A zone corner far from any trunk/
+// primary road can still have a nearby secondary/tertiary street.
+const BOARDABLE_HIGHWAY_CLASSES = [
+  ...MAIN_ROAD_HIGHWAY_CLASSES,
+  "secondary",
+  "secondary_link",
+  "tertiary",
+  "tertiary_link",
+];
 const INCLUDED_HIGHWAY_CLASSES = [
   ...MAIN_ROAD_HIGHWAY_CLASSES,
   "secondary",
@@ -152,6 +163,7 @@ async function main() {
     if (el.type !== "way" || !Array.isArray(el.nodes)) continue;
     const highway = el.tags?.highway as string | undefined;
     const isMainRoad = !!highway && MAIN_ROAD_HIGHWAY_CLASSES.includes(highway);
+    const boardable = !!highway && BOARDABLE_HIGHWAY_CLASSES.includes(highway);
 
     const wayCoords: [number, number][] = el.nodes.map((id: number) => nodeCoords.get(id)).filter(Boolean);
     if (wayCoords.length < 2) continue;
@@ -178,6 +190,7 @@ async function main() {
         distanceKm,
         trikeMinutes: (distanceKm / TRIKE_SPEED_KMH) * 60,
         isMainRoad,
+        boardable,
         zoneId,
         walkable: true,
         coordinates: [aCoord, bCoord],
