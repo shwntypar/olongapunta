@@ -77,6 +77,21 @@ const MARTINS_GRAPH = loadGraph(rawMartinsGraph as unknown as MartinsGraph);
 const MARTINS_NODES = [...MARTINS_GRAPH.nodes.values()];
 const MARTINS_RIDE_COLOR = "#8b5cf6"; // violet — tricycle ride color, distinct from jeepney route colors
 
+// Shared between the map markers, the sidebar's "Nearby Spots" list, and the
+// sidebar's zone-grouped "Tricycle Stops" tab — one source of truth so all
+// three stay in sync automatically. Built once at module load since it has
+// no dependency on component state. zoneId is what the "Tricycle Stops" tab
+// groups by.
+const TRICYCLE_STAND_PLACES = GREEN_ZONE_BOARDING_SPOTS.map(([lon, lat], i) => ({
+  id: `green-boarding-${i}`,
+  name: `Green Zone Stop ${i + 1}`,
+  type: "tricycle_stand",
+  zoneId: "toda-2",
+  lat,
+  lon,
+  excludeModes: ["tricycle"],
+}));
+
 const AMENITY_PRIORITY: Record<string, number> = {
   "townhall": 1, "hospital": 1, "police": 1, "fire_station": 1, "bus_station": 1, 
   "ferry_terminal": 1, "university": 1, "college": 1,
@@ -284,6 +299,12 @@ export default function MapComponent() {
   // The precomputed graph means this resolves synchronously, so (unlike the
   // old Overpass-backed engine) there's no loading race to guard against.
   const [martinsRoutes, setMartinsRoutes] = useState<MartinsRouteResult[]>([]);
+  // Distinguishes "no tricycle zone/graph reaches this trip at all" from
+  // "the zone covers it fine, but this trip is short enough that walking
+  // dominates every tricycle option" — the empty-state message needs to say
+  // something different for each, since the first is a coverage gap and the
+  // second is the algorithm correctly concluding a trike isn't worth it.
+  const [tricycleWalkOnly, setTricycleWalkOnly] = useState(false);
   const [activeMartinsIdx, setActiveMartinsIdx] = useState<number>(0);
 
   const [visibleRouteIds, setVisibleRouteIds] = useState<string[]>(mockRoutes.map(r => r.id));
@@ -539,7 +560,7 @@ export default function MapComponent() {
   // 🚗 DRAW MODAL ALTERNATIVE ROUTE GEOMETRIES & FLOATING PILLS
   //    (Applies to Driving, Walking, and Motor modes)
   // =====================================================
-  const drawAlternativeModalityRoutes = (routes: any[], activeIdx: number, activeColor: string) => {
+  const drawAlternativeModalityRoutes = (routes: any[], activeIdx: number, activeColor: string, asDots: boolean = false) => {
     if (!map.current) return;
     const currentMap = map.current;
 
@@ -553,6 +574,25 @@ export default function MapComponent() {
 
     if (!routes || routes.length === 0) return;
 
+    const activeRoute = routes[activeIdx];
+    if (!activeRoute) return;
+
+    if (asDots) {
+      // Walking: same small-dot style as Transit/Tricycle walk legs — no
+      // colored line at all, so it never gets confused with a ride.
+      if (currentMap.getLayer("active-route-layer")) {
+        currentMap.setLayoutProperty("active-route-layer", "visibility", "none");
+      }
+      renderWalkDots(currentMap, [activeRoute.geometry]);
+      return;
+    }
+
+    // Driving/Motor: solid colored line — and make sure no walk-dots are
+    // left over from a previous Transit/Tricycle/Walking search.
+    if (currentMap.getLayer(WALK_DOT_LAYER)) {
+      currentMap.setLayoutProperty(WALK_DOT_LAYER, "visibility", "none");
+    }
+
     routes.forEach((route, idx) => {
       if (idx === activeIdx) {
         // Draw active path on "active-route"
@@ -564,7 +604,7 @@ export default function MapComponent() {
         if (source) {
           source.setData(activeRouteGeoJSON as any);
           currentMap.setPaintProperty("active-route-layer", "line-color", activeColor);
-          currentMap.setPaintProperty("active-route-layer", "line-dasharray", travelMode === 'walking' ? [2, 2] : [1, 0]);
+          currentMap.setPaintProperty("active-route-layer", "line-dasharray", [1, 0]);
           currentMap.setLayoutProperty("active-route-layer", "visibility", "visible");
         } else {
           currentMap.addSource("active-route", { type: "geojson", data: activeRouteGeoJSON as any });
@@ -573,11 +613,11 @@ export default function MapComponent() {
             type: "line",
             source: "active-route",
             layout: { "line-join": "round", "line-cap": "round", "visibility": "visible" },
-            paint: { 
-              "line-color": activeColor, 
-              "line-width": 6, 
-              "line-opacity": 0.9, 
-              "line-dasharray": travelMode === 'walking' ? [2, 2] : [1, 0] 
+            paint: {
+              "line-color": activeColor,
+              "line-width": 6,
+              "line-opacity": 0.9,
+              "line-dasharray": [1, 0]
             },
           });
         }
@@ -1096,12 +1136,20 @@ export default function MapComponent() {
           void drawMartinsRouteOnMap();
         }
       } else {
+        // Hide (or reveal) walk-dots the instant the mode changes, even
+        // before alternativeRoutes finishes loading — otherwise dots left
+        // over from a previous Transit/Tricycle/Walking search can sit
+        // visible under Driving/Motor's line for a moment.
+        if (map.current?.getLayer(WALK_DOT_LAYER)) {
+          map.current.setLayoutProperty(WALK_DOT_LAYER, "visibility", travelMode === "walking" ? "visible" : "none");
+        }
+
         if (alternativeRoutes.length > 0) {
           let activeColor = "#3b82f6"; // Driving
           if (travelMode === "walking") activeColor = "#10b981";
           if (travelMode === "cycling") activeColor = "#f59e0b"; // Motor
-          
-          drawAlternativeModalityRoutes(alternativeRoutes, activeRouteIdx, activeColor);
+
+          drawAlternativeModalityRoutes(alternativeRoutes, activeRouteIdx, activeColor, travelMode === "walking");
 
           const activeRoute = alternativeRoutes[activeRouteIdx];
           if (activeRoute) {
@@ -1147,6 +1195,7 @@ export default function MapComponent() {
     setTransitCandidates([]);
     setMartinsRoutes([]);
     setActiveMartinsIdx(0);
+    setTricycleWalkOnly(false);
 
     // Hide all default jeepney route overlays
     mockRoutes.forEach(route => {
@@ -1206,11 +1255,13 @@ export default function MapComponent() {
         const startNode = nearestNode(MARTINS_NODES, startingCoords as [number, number]);
         const goalNode = nearestNode(MARTINS_NODES, [endLon, endLat]);
 
-        const routes = startNode && goalNode
-          ? selectDirectAndTransfer(curateParetoRoutes(findParetoRoutes(MARTINS_GRAPH, startNode.id, goalNode.id).filter(requiresTricycle)))
-          : [];
+        const rawRoutes = startNode && goalNode ? findParetoRoutes(MARTINS_GRAPH, startNode.id, goalNode.id) : [];
+        const withTrike = rawRoutes.filter(requiresTricycle);
+        const routes = selectDirectAndTransfer(curateParetoRoutes(withTrike));
+
         setMartinsRoutes(routes);
         setActiveMartinsIdx(0);
+        setTricycleWalkOnly(rawRoutes.length > 0 && withTrike.length === 0);
 
         if (routes.length === 0) {
           // No zone covers this trip — clear out whatever the previous mode left behind
@@ -1364,16 +1415,8 @@ export default function MapComponent() {
     if (!map.current) return;
     const currentMap = map.current;
 
-    GREEN_ZONE_BOARDING_SPOTS.forEach(([lon, lat], i) => {
-      const place = {
-        id: `green-boarding-${i}`,
-        name: "Green Tricycle Boarding Area",
-        type: "tricycle_stand",
-        lat,
-        lon,
-        excludeModes: ["tricycle"],
-      };
-
+    TRICYCLE_STAND_PLACES.forEach((place) => {
+      const { lon, lat } = place;
       const priority = getPriority(place.type);
       const el = createCustomMarkerElement(place.type, priority);
       const marker = new mapboxgl.Marker({ element: el }).setLngLat([lon, lat]).addTo(currentMap);
@@ -1522,11 +1565,19 @@ export default function MapComponent() {
       });
       drawGreenZoneBoardingSpots();
 
+      // Tricycle stops are static, local data — shown immediately, not
+      // gated behind the live Overpass-backed amenities fetch below (which
+      // can be slow or fail; the stops shouldn't disappear when it does).
+      setPlaces(TRICYCLE_STAND_PLACES);
+
       try {
         const res = await fetch("/api/amenities");
         const parsedPlaces = parseAmenities(await res.json());
-        
-        setPlaces(parsedPlaces);
+
+        // Tricycle stops belong in the same "Nearby Spots" list as real
+        // amenities, not just as map pins — same click-to-navigate flow,
+        // same badge styling, just a different place type.
+        setPlaces([...parsedPlaces, ...TRICYCLE_STAND_PLACES]);
 
         parsedPlaces.forEach((place: any) => {
           const priority = getPriority(place.type);
@@ -1609,6 +1660,7 @@ export default function MapComponent() {
         martinsRoutes={martinsRoutes}
         activeMartinsIdx={activeMartinsIdx}
         setActiveMartinsIdx={setActiveMartinsIdx}
+        tricycleWalkOnly={tricycleWalkOnly}
 
         onCloseRouting={() => {
           setIsRoutingMode(false);
@@ -1620,6 +1672,7 @@ export default function MapComponent() {
           setActiveTransitIdx(0);
           setMartinsRoutes([]);
           setActiveMartinsIdx(0);
+          setTricycleWalkOnly(false);
 
           setIsolatedDirectionId(null);
           routeEndpointMarkers.current.forEach(marker => marker.remove());

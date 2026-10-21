@@ -41,6 +41,7 @@ interface SidebarProps {
   martinsRoutes?: any[];
   activeMartinsIdx?: number;
   setActiveMartinsIdx?: (idx: number) => void;
+  tricycleWalkOnly?: boolean;
 }
 
 export default function Sidebar({
@@ -76,8 +77,9 @@ export default function Sidebar({
   martinsRoutes = [],
   activeMartinsIdx = 0,
   setActiveMartinsIdx,
+  tricycleWalkOnly = false,
 }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<"explore" | "routes">("explore");
+  const [activeTab, setActiveTab] = useState<"explore" | "routes" | "stops">("explore");
 
   // Nearby places now live in the mobile bottom sheet (Google Maps-style),
   // so the drawer on small screens should open straight into Jeepney Routes.
@@ -218,11 +220,85 @@ export default function Sidebar({
               >
                 Jeepney Routes
               </button>
+              <button
+                onClick={() => setActiveTab("stops")}
+                className={`flex-1 py-4 text-sm font-bold tracking-wide transition-all border-b-2 ${
+                  activeTab === "stops"
+                    ? "border-emerald-600 text-emerald-600 bg-white"
+                    : "border-transparent text-gray-400 hover:text-gray-700"
+                }`}
+              >
+                Tricycle Stops
+              </button>
             </div>
 
             {/* Scrollable explore list */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-gray-300">
-              {activeTab === "explore" ? (
+              {activeTab === "stops" ? (
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">
+                    Tricycle Zones &amp; Stops
+                  </h3>
+                  {tricycleZones.map((zone) => {
+                    const zoneStops = places.filter(
+                      (p) => p.type === "tricycle_stand" && p.zoneId === zone.id
+                    );
+
+                    return (
+                      <div key={zone.id} className="p-4 rounded-xl border bg-white border-gray-200 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: zone.color }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                {zone.code}
+                              </span>
+                              <span className="text-xs font-bold text-gray-400 uppercase tracking-wide truncate">
+                                {zone.name}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-gray-400 mt-0.5 block">
+                              Base fare ₱{zone.baseFare.toFixed(2)} · ₱{zone.farePerKm.toFixed(2)}/km
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 space-y-1.5">
+                          {zoneStops.length === 0 ? (
+                            <div className="text-xs text-gray-400 italic px-1">
+                              No surveyed stops yet for this zone.
+                            </div>
+                          ) : (
+                            zoneStops.map((stop) => (
+                              <div
+                                key={stop.id}
+                                onClick={() => onSelectPlace(stop)}
+                                className="group w-full flex items-center justify-between gap-2 text-left text-xs font-medium p-2 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 cursor-pointer transition-colors"
+                              >
+                                <span className="truncate">🛺 {stop.name}</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onStartNavigation(stop);
+                                  }}
+                                  className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 text-white p-1.5 rounded-md transition-colors flex items-center justify-center shadow-sm"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : activeTab === "explore" ? (
                 <div className="space-y-3">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">
                     Nearby Spots ({places.length})
@@ -576,7 +652,9 @@ export default function Sidebar({
               {routeInstructions.length === 0 ? (
                 mode === "tricycle" && martinsRoutes.length === 0 ? (
                   <div className="text-center py-12 text-gray-400 text-sm">
-                    🛺 No tricycle zone covers this trip yet.
+                    {tricycleWalkOnly
+                      ? "🚶 This trip is short enough that walking beats any tricycle option — no ride is worth the fare here."
+                      : "🛺 No tricycle zone covers this trip yet."}
                   </div>
                 ) : (
                   <div className="text-center py-12 text-gray-400 text-sm animate-pulse">
