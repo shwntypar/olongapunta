@@ -160,7 +160,16 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
       // Home-zone road, or a road outside every mapped zone (treated as
       // neutral territory a trike can freely transit without a fee).
       if (edgeZone !== null && homeRule && !homeRule.mainRoadAllowed && edge.isMainRoad) continue; // hard block
-      const homePenalty = homeRule?.mainRoadPenalty ?? MAIN_ROAD_PENALTY;
+      // A zone's mainRoadPenalty override (e.g. Green/Blue's 1x — "don't
+      // avoid it, it's the normal route") is a judgment about THAT zone's
+      // own roads specifically. It must not also apply to untagged/neutral
+      // roads far outside the zone's polygon, or a ride starting in a zone
+      // with a permissive override would freely take any main road all the
+      // way to an unrelated destination instead of being soft-steered off
+      // it like every other zone. Only a road actually tagged as the home
+      // zone gets the zone's own override; untagged roads always use the
+      // generic default.
+      const homePenalty = edgeZone === homeZone ? (homeRule?.mainRoadPenalty ?? MAIN_ROAD_PENALTY) : MAIN_ROAD_PENALTY;
       options.push({
         state: { ...state, node: edge.to },
         minutes: edge.trikeMinutes * (edge.isMainRoad ? homePenalty : 1),

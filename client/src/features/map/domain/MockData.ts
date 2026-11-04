@@ -36,7 +36,19 @@ export interface JeepneyRoute {
   farePerKm: number;
   stops: RouteStop[];
   path?: [number, number][]; // Optional full path coordinates [lng, lat]
-  returnPath?: [number, number][];  
+  returnPath?: [number, number][];
+  /**
+   * A long-haul route to an outlying barangay or an outright different
+   * province (Cabalan, Tipo/Dinalupihan in Bataan), rather than a route
+   * that serves Olongapo City proper. Direct door-to-door candidates for
+   * these are already naturally gated by the boarding/alighting-at-terminal
+   * fix in getDirections.ts (a commuter's real destination has to be near
+   * the route's actual far terminal to match at all), but the 2-jeepney
+   * transfer search can still splice a short in-city segment of one of
+   * these into a combo for a trip that has nothing to do with Cabalan or
+   * Bataan. True here excludes a route from that transfer search.
+   */
+  isProvincial?: boolean;
 }
 
 export const mockRoutes: JeepneyRoute[] = [
@@ -317,6 +329,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Forestry, Old Cabalan to Palengke',
     routeCode: 'J-06',
     reversedName: 'Palengke to Forestry, Old Cabalan',
+    isProvincial: true,
     baseFare: 13.00,
     farePerKm: 1.40,
     stops: [
@@ -352,6 +365,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Old Cabalan to Palengke',
     routeCode: 'J-06',
     reversedName: 'Palengke to Old Cabalan',
+    isProvincial: true,
     baseFare: 13.00,
     farePerKm: 1.40,
     stops: [
@@ -385,6 +399,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Tipo, Bataan to Olongapo',
     routeCode: 'J-01',
     reversedName: 'Olongapo to Tipo, Bataan',
+    isProvincial: true,
     baseFare: 13.00,
     farePerKm: 1.40,
     stops: [
@@ -451,6 +466,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Dinalupihan, Bataan to Olongapo',
     routeCode: 'J-10',
     reversedName: 'Olongapo to Dinalupihan, Bataan',
+    isProvincial: true,
     baseFare: 13.00,
     farePerKm: 1.40,
     stops: [

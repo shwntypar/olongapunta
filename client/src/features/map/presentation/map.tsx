@@ -50,6 +50,7 @@ function getCategoryColor(type: string) {
   if (['supermarket', 'mall', 'marketplace', 'restaurant', 'cafe', 'fast_food'].includes(t)) return '#f59e0b';
   if (['townhall', 'police', 'fire_station', 'post_office'].includes(t)) return '#8b5cf6';
   if (t === 'tricycle_stand') return '#16a34a';
+  if (t === 'jeepney_stop') return '#7c3aed';
   return '#64748b';
 }
 
@@ -92,6 +93,23 @@ const TRICYCLE_STAND_PLACES = GREEN_ZONE_BOARDING_SPOTS.map(([lon, lat], i) => (
   excludeModes: ["tricycle"],
 }));
 
+// Jeepney stops, for the sidebar and "Nearby Spots" list — same idea as
+// TRICYCLE_STAND_PLACES above, built from each route's own stops[] entries
+// rather than a separate field survey. Not routed TO via jeepney (that's
+// nonsensical — you'd just walk there), same as excludeModes on a tricycle
+// stand.
+const JEEPNEY_STOP_PLACES = mockRoutes.flatMap((route) =>
+  route.stops.map((stop, i) => ({
+    id: `${route.id}-stop-${stop.order ?? i}`,
+    name: stop.name,
+    type: "jeepney_stop",
+    routeId: route.id,
+    lat: stop.lat,
+    lon: stop.lng,
+    excludeModes: ["transit"],
+  }))
+);
+
 const AMENITY_PRIORITY: Record<string, number> = {
   "townhall": 1, "hospital": 1, "police": 1, "fire_station": 1, "bus_station": 1, 
   "ferry_terminal": 1, "university": 1, "college": 1,
@@ -101,10 +119,19 @@ const AMENITY_PRIORITY: Record<string, number> = {
   "waste_basket": 4, "toilets": 4, "parking_space": 4, "motorcycle_parking": 4,
   "bicycle_parking": 4, "shelter": 4, "compressed_air": 4,
   "tricycle_stand": 2,
+  "jeepney_stop": 2,
 };
 
 function getPriority(type: string): number {
   return AMENITY_PRIORITY[type.toLowerCase()] || 3;
+}
+
+// Shared by the on-load GPS attempt and the "navigate from here" flow —
+// a PC has no real GPS, so prompting someone to retry a failed lookup
+// there is just noise; the documented desktop flow is to drop a pin
+// instead, which already works regardless of this.
+function isMobileDevice(): boolean {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 }
 
 function createCustomMarkerElement(type: string, priority: number) {
@@ -134,6 +161,7 @@ function createCustomMarkerElement(type: string, priority: number) {
     </svg>`;
     
   el.dataset.priority = priority.toString();
+  el.dataset.type = type;
   
   return el;
 }
@@ -280,6 +308,16 @@ export default function MapComponent() {
   const [origin, setOrigin] = useState<{name: string, coords: number[]} | null>(null);
   const [isPickingOrigin, setIsPickingOrigin] = useState(false);
   const isPickingOriginRef = useRef(false);
+  // True once the automatic on-load GPS attempt below has failed or timed
+  // out — e.g. the permission prompt took longer than the timeout to
+  // answer. Previously the only recovery was a full page reload, since
+  // geolocation was only ever requested once, in the mount effect. This
+  // lets the user retry from a button instead.
+  const [gpsFailed, setGpsFailed] = useState(false);
+  // True while the live /api/amenities fetch is in flight — a cache miss
+  // there can still take tens of seconds, so the sidebar shows a spinner
+  // instead of just silently sitting on the static stops list.
+  const [isLoadingAmenities, setIsLoadingAmenities] = useState(true);
 
   const [isRoutingMode, setIsRoutingMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -329,31 +367,46 @@ export default function MapComponent() {
     if (window.innerWidth < 1024) setIsSidebarOpen(false);
   }, []);
 
+  // Pulled out of the mount effect below so the "Enable Location" retry
+  // button can call the exact same logic without needing a page reload.
+  const fetchLiveLocation = () => {
+    if (!("geolocation" in navigator)) return;
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const liveCoords = [position.coords.longitude, position.coords.latitude];
+
+        setGpsFailed(false);
+        setOrigin({
+          name: "My Current Location",
+          coords: liveCoords
+        });
+
+        if (startMarkerRef.current) {
+          startMarkerRef.current.setLngLat(liveCoords as any);
+        }
+
+        if (map.current) {
+          map.current.flyTo({ center: liveCoords as any, zoom: 15, duration: 2000 });
+        }
+      },
+      (error) => {
+        console.warn("GPS request failed or timed out:", error);
+        // Desktops rarely have real GPS — don't nag with a retry prompt
+        // there; the manual pin-drop flow already covers it.
+        if (isMobileDevice()) setGpsFailed(true);
+      },
+      // 15s rather than 5s: on a first-time prompt, the 5s clock was often
+      // already up before the user had even clicked "Allow," which quietly
+      // failed and left the only way to get a live location being a full
+      // page reload (by which point the permission was already granted, so
+      // the retry on reload resolved near-instantly).
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
   useEffect(() => {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const liveCoords = [position.coords.longitude, position.coords.latitude];
-          
-          setOrigin({
-            name: "My Current Location",
-            coords: liveCoords
-          });
-
-          if (startMarkerRef.current) {
-            startMarkerRef.current.setLngLat(liveCoords as any);
-          }
-
-          if (map.current) {
-            map.current.flyTo({ center: liveCoords as any, zoom: 15, duration: 2000 });
-          }
-        },
-        (error) => {
-          console.warn("User denied GPS on load or signal failed:", error);
-        },
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    }
+    fetchLiveLocation();
   }, []);
 
   // Recalculates route immediately on parameters change
@@ -538,13 +591,12 @@ export default function MapComponent() {
       setTravelMode("transit");
     }
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  
-    if (isMobile) {
+    if (isMobileDevice()) {
        requestGpsLocation(place);
     } else {
-       setIsPickingOrigin(true); 
-       alert("Since you are on a PC, please click your starting point on the map.");
+       // No native alert() — the "Click anywhere on the map..." banner
+       // below already says this, without blocking the page on an "OK".
+       setIsPickingOrigin(true);
     }
   };
 
@@ -648,9 +700,14 @@ export default function MapComponent() {
     const endLon = parseFloat(selectedPlace.lon);
     const endLat = parseFloat(selectedPlace.lat);
 
-    // 2. Render all alternative transit candidates as gray/dashed lines
-    //    ✅ FIX: fetch real Mapbox walking geometry instead of straight diagonal lines
-    const altCandidates = transitCandidates.filter((_, idx) => idx !== activeTransitIdx);
+    // Alternative transit candidates are intentionally not drawn on the map
+    // anymore — they were gray/dashed overlays of every walk+ride(+walk+ride)
+    // segment per alternative, which got cluttered fast (especially once a
+    // transfer candidate was involved) and duplicated what the "Alternative
+    // Jeepney Transfers" list in the sidebar already shows as text. The
+    // cleanup loop above still removes any such layers left over from a
+    // previous session/version. Only the active plan renders below.
+    const altCandidates: typeof transitCandidates = [];
 
     await Promise.all(altCandidates.map(async (candidate) => {
       // rawIdx is index in filtered list; we need the original index for layer IDs
@@ -1438,6 +1495,37 @@ export default function MapComponent() {
     });
   };
 
+  // Same idea as drawGreenZoneBoardingSpots above, for JEEPNEY_STOP_PLACES.
+  // These were already in the `places` state (so they showed up in the
+  // sidebar's Stops tab and search), but nothing ever actually created a
+  // map marker for one — this is the piece that was missing.
+  const drawJeepneyStops = () => {
+    if (!map.current) return;
+    const currentMap = map.current;
+
+    JEEPNEY_STOP_PLACES.forEach((place) => {
+      const { lon, lat } = place;
+      const priority = getPriority(place.type);
+      const el = createCustomMarkerElement(place.type, priority);
+      const marker = new mapboxgl.Marker({ element: el }).setLngLat([lon, lat]).addTo(currentMap);
+
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const existing = document.getElementsByClassName("mapboxgl-popup");
+        while (existing[0]) existing[0].remove();
+
+        new mapboxgl.Popup({ offset: 25, closeButton: false })
+          .setLngLat([lon, lat])
+          .setHTML('<div id="popup-portal-root"></div>')
+          .addTo(currentMap);
+
+        setSelectedPlace(place);
+      });
+
+      markers.current.push(marker);
+    });
+  };
+
   const drawJeepneyRouteLine = async (jeepney: any) => {
     if (!map.current) return;
     if (!jeepney?.path || jeepney.path.length < 2) return;  
@@ -1532,23 +1620,32 @@ export default function MapComponent() {
 
       markers.current.forEach((marker) => {
         const el = marker.getElement();
-        
+
         if (isRoutingModeRef.current) {
           el.style.display = "none";
-          return; 
+          return;
+        }
+
+        // Tricycle and jeepney stops are the app's actual subject matter,
+        // not general-purpose clutter like every bank or pharmacy in the
+        // city — they stay on screen at any zoom instead of only appearing
+        // once you've zoomed in past SHOW_SCHOOLS_BANKS.
+        if (el.dataset.type === "tricycle_stand" || el.dataset.type === "jeepney_stop") {
+          el.style.display = "flex";
+          return;
         }
 
         const priority = parseInt(el.dataset.priority || "3");
 
         if (zoom < SHOW_HOSPITALS) {
           el.style.display = "none";
-        } 
+        }
         else if (priority > 1 && zoom < SHOW_SCHOOLS_BANKS) {
           el.style.display = "none";
-        } 
+        }
         else if (priority > 2 && zoom < SHOW_EVERYTHING) {
           el.style.display = "none";
-        } 
+        }
         else {
           el.style.display = "flex";
         }
@@ -1564,11 +1661,16 @@ export default function MapComponent() {
         drawTricycleZonePolygon(zone);
       });
       drawGreenZoneBoardingSpots();
+      // drawJeepneyStops() — disabled for now (jeepney stop coordinates
+      // aren't verified data yet, unlike the Green zone tricycle spots).
+      // The function and JEEPNEY_STOP_PLACES are left in place so this is
+      // a one-line flip to turn back on.
+      // drawJeepneyStops();
 
       // Tricycle stops are static, local data — shown immediately, not
       // gated behind the live Overpass-backed amenities fetch below (which
       // can be slow or fail; the stops shouldn't disappear when it does).
-      setPlaces(TRICYCLE_STAND_PLACES);
+      setPlaces([...TRICYCLE_STAND_PLACES]);
 
       try {
         const res = await fetch("/api/amenities");
@@ -1599,7 +1701,11 @@ export default function MapComponent() {
           markers.current.push(marker);
         });
         updateMarkerVisibility();
-      } catch (e) { console.error(e); }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsLoadingAmenities(false);
+      }
 
       currentMap.on("zoomend", updateMarkerVisibility);
       currentMap.on("moveend", updateMarkerVisibility);
@@ -1628,9 +1734,10 @@ export default function MapComponent() {
   return (
     <div className="relative w-full h-screen overflow-hidden flex">
       
-      <Sidebar 
-        places={filteredPlaces} 
-        userLocation={DEFAULT_CITY_CENTER} 
+      <Sidebar
+        places={filteredPlaces}
+        isLoadingAmenities={isLoadingAmenities}
+        userLocation={DEFAULT_CITY_CENTER}
         origin={origin}
         destination={selectedPlace}
         mode={travelMode}
@@ -1722,8 +1829,12 @@ export default function MapComponent() {
 
         onSelectPlace={(place) => {
           setSelectedPlace(place);
-          map.current?.flyTo({ center: [place.lon, place.lat], zoom: 16 });
-        }} 
+          // 17, not 16 — amenity markers only turn on above specific zoom
+          // thresholds (updateMarkerVisibility below; tricycle/jeepney
+          // stops need 16.5+), so flying to 16 would center on a stop and
+          // still show nothing there.
+          map.current?.flyTo({ center: [place.lon, place.lat], zoom: 17 });
+        }}
 
         onStartNavigation={startNavigationFlow}
       />
@@ -1733,15 +1844,51 @@ export default function MapComponent() {
         searchQuery={searchQuery}
         onSelectPlace={(place) => {
           setSelectedPlace(place);
-          map.current?.flyTo({ center: [place.lon, place.lat], zoom: 16 });
+          map.current?.flyTo({ center: [place.lon, place.lat], zoom: 17 });
         }}
         onStartNavigation={startNavigationFlow}
         hidden={isRoutingMode || isPickingOrigin || isSidebarOpen}
       />
 
       {isPickingOrigin && (
-        <div className="absolute top-20 left-1/2 lg:left-[calc(50%+10rem)] -translate-x-1/2 z-30 bg-blue-600 text-white px-4 sm:px-6 py-3 rounded-full shadow-lg font-bold text-sm sm:text-base text-center animate-bounce cursor-default border-2 border-white whitespace-nowrap">
-          Click anywhere on the map to set your Starting Point
+        <div className="absolute top-20 left-1/2 lg:left-[calc(50%+10rem)] -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 backdrop-blur-sm text-gray-700 pl-2 pr-2.5 py-2 rounded-full shadow-md border border-gray-200 whitespace-nowrap">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm">
+            📍
+          </span>
+          <span className="text-xs sm:text-sm font-medium">Click anywhere on the map to set your starting point</span>
+          <button
+            onClick={() => setIsPickingOrigin(false)}
+            aria-label="Cancel"
+            className="flex-shrink-0 w-6 h-6 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {gpsFailed && !origin && (
+        <div className="absolute top-20 left-1/2 lg:left-[calc(50%+10rem)] -translate-x-1/2 z-30 flex items-center gap-2 bg-white/95 backdrop-blur-sm text-gray-700 pl-2 pr-2.5 py-2 rounded-full shadow-md border border-gray-200 whitespace-nowrap">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-sm">
+            📍
+          </span>
+          <span className="text-xs sm:text-sm font-medium">Couldn't get your location</span>
+          <button
+            onClick={fetchLiveLocation}
+            className="flex-shrink-0 text-xs sm:text-sm font-bold text-blue-600 hover:text-blue-700 px-2 py-1 rounded-full hover:bg-blue-50 transition-colors"
+          >
+            Retry
+          </button>
+          <button
+            onClick={() => setGpsFailed(false)}
+            aria-label="Dismiss"
+            className="flex-shrink-0 w-6 h-6 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 

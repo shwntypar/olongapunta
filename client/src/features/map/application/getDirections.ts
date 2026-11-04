@@ -257,6 +257,13 @@ export const findTransitRouteCandidates = (originCoords: number[], destCoords: n
     if (!pathCoords || pathCoords.length < 2) return;
 
     const jeepneyLine = turf.lineString(pathCoords);
+    // Reverted: pinning boarding/dropoff to the route's own first/last path
+    // node required being within MAX_WALK of BOTH of a route's real-world
+    // terminals (which can be kilometers apart), so almost no real trip
+    // matched anything — transit stopped returning candidates entirely.
+    // Jeepneys are hail-and-ride (board/alight anywhere along the route),
+    // so nearest-point-on-line to the actual trip coordinates is correct,
+    // not a shortcut.
     const boardingPoint = turf.nearestPointOnLine(jeepneyLine, startPoint);
     const dropoffPoint = turf.nearestPointOnLine(jeepneyLine, endPoint);
 
@@ -294,8 +301,16 @@ export const findTransitRouteCandidates = (originCoords: number[], destCoords: n
   });
 
   // 2. Gather Multi-Hop Candidates
+  // Provincial routes (Cabalan, Bataan) are excluded here: a transfer only
+  // rides part of each leg, so splicing one in would offer a Cabalan- or
+  // Bataan-bound jeepney for a short in-city segment that has nothing to do
+  // with either place. Direct, single-hop candidates for these routes are
+  // unaffected — see evaluateSinglePath above, which already only offers
+  // one when the commuter's real destination is near that route's actual
+  // far terminal.
   const directions: { route: any; coords: number[][]; label: string }[] = [];
   for (const route of mockRoutes) {
+    if (route.isProvincial) continue;
     if (route.path && route.path.length >= 2) {
       directions.push({ route, coords: route.path, label: route.routeName });
     }
@@ -308,12 +323,22 @@ export const findTransitRouteCandidates = (originCoords: number[], destCoords: n
   for (let i = 0; i < directions.length; i++) {
     const a = directions[i];
     const lineA = turf.lineString(a.coords);
+    // Reverted along with evaluateSinglePath above — same reasoning.
     const boardA = turf.nearestPointOnLine(lineA, startPoint);
     const walkToA = turf.distance(startPoint, boardA);
     if (walkToA > MAX_WALK) continue;
 
     for (let j = 0; j < directions.length; j++) {
       if (a.route.id === directions[j].route.id) continue;
+      // Several distinct routes in the dataset share the same display code
+      // (three different routes are all "J-01", for instance) — excluding
+      // only by id let a transfer get suggested between two different
+      // routes that happen to share a code, which rendered as the
+      // nonsensical "J-01 → J-01" in the UI. A transfer between two
+      // same-coded routes isn't a meaningful option even when they really
+      // are different physical routes, since nothing distinguishes them to
+      // the commuter looking at the label.
+      if (a.route.routeCode === directions[j].route.routeCode) continue;
 
       const b = directions[j];
       const lineB = turf.lineString(b.coords);

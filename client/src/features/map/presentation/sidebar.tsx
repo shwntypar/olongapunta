@@ -8,6 +8,7 @@ export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricyc
 
 interface SidebarProps {
   places: any[];
+  isLoadingAmenities?: boolean;
   userLocation: number[];
   origin: { name: string; coords: number[] } | null;
   destination: any | null;
@@ -46,6 +47,7 @@ interface SidebarProps {
 
 export default function Sidebar({
   places,
+  isLoadingAmenities = false,
   origin,
   destination,
   mode,
@@ -228,84 +230,177 @@ export default function Sidebar({
                     : "border-transparent text-gray-400 hover:text-gray-700"
                 }`}
               >
-                Tricycle Stops
+                Stops
               </button>
             </div>
 
             {/* Scrollable explore list */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-gray-300">
               {activeTab === "stops" ? (
-                <div className="space-y-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">
-                    Tricycle Zones &amp; Stops
-                  </h3>
-                  {tricycleZones.map((zone) => {
-                    const zoneStops = places.filter(
-                      (p) => p.type === "tricycle_stand" && p.zoneId === zone.id
-                    );
+                <div className="space-y-7">
+                  <div className="space-y-3.5">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">
+                      Tricycle Zones &amp; Stops
+                    </h3>
+                    {tricycleZones.map((zone) => {
+                      const zoneStops = places.filter(
+                        (p) => p.type === "tricycle_stand" && p.zoneId === zone.id
+                      );
 
-                    return (
-                      <div key={zone.id} className="p-4 rounded-xl border bg-white border-gray-200 shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-3.5 h-3.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: zone.color }}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-                                {zone.code}
-                              </span>
-                              <span className="text-xs font-bold text-gray-400 uppercase tracking-wide truncate">
-                                {zone.name}
+                      return (
+                        <div key={zone.id} className="p-4 rounded-xl border bg-white border-gray-200 shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: zone.color }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-black px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                  {zone.code}
+                                </span>
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wide truncate">
+                                  {zone.name}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-gray-400 mt-1 block">
+                                Base fare ₱{zone.baseFare.toFixed(2)} · ₱{zone.farePerKm.toFixed(2)}/km
                               </span>
                             </div>
-                            <span className="text-[10px] text-gray-400 mt-0.5 block">
-                              Base fare ₱{zone.baseFare.toFixed(2)} · ₱{zone.farePerKm.toFixed(2)}/km
-                            </span>
+                          </div>
+
+                          <div className="mt-4 space-y-2">
+                            {zoneStops.length === 0 ? (
+                              <div className="text-xs text-gray-400 italic px-1 py-1">
+                                No surveyed stops yet for this zone.
+                              </div>
+                            ) : (
+                              zoneStops.map((stop) => (
+                                <div
+                                  key={stop.id}
+                                  onClick={() => onSelectPlace(stop)}
+                                  className="group w-full flex items-center justify-between gap-3 text-left text-xs font-medium px-3 py-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 cursor-pointer transition-colors"
+                                >
+                                  <span className="truncate leading-relaxed">🛺 {stop.name}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onStartNavigation(stop);
+                                    }}
+                                    className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-md transition-colors flex items-center justify-center shadow-sm"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              ))
+                            )}
                           </div>
                         </div>
+                      );
+                    })}
+                  </div>
 
-                        <div className="mt-3 space-y-1.5">
-                          {zoneStops.length === 0 ? (
-                            <div className="text-xs text-gray-400 italic px-1">
-                              No surveyed stops yet for this zone.
-                            </div>
-                          ) : (
-                            zoneStops.map((stop) => (
-                              <div
-                                key={stop.id}
-                                onClick={() => onSelectPlace(stop)}
-                                className="group w-full flex items-center justify-between gap-2 text-left text-xs font-medium p-2 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 cursor-pointer transition-colors"
-                              >
-                                <span className="truncate">🛺 {stop.name}</span>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onStartNavigation(stop);
-                                  }}
-                                  className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 text-white p-1.5 rounded-md transition-colors flex items-center justify-center shadow-sm"
-                                >
-                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                                  </svg>
-                                </button>
+                  {/* Jeepney Routes & Stops — disabled for now (stop
+                      coordinates aren't verified data yet); wrapped in
+                      `false &&` rather than deleted so it's a one-line
+                      flip to bring back. */}
+                  {false && (
+                  <div className="space-y-3.5">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">
+                      Jeepney Routes &amp; Stops
+                    </h3>
+                    {mockRoutes.map((route) => {
+                      const routeStops = places.filter(
+                        (p) => p.type === "jeepney_stop" && p.routeId === route.id
+                      );
+
+                      return (
+                        <div key={route.id} className="p-4 rounded-xl border bg-white border-gray-200 shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-3.5 h-3.5 rounded-full flex-shrink-0 border border-black/10"
+                              style={{ backgroundColor: getJeepneyHexColor(route.colorCode) }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-black px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                  {route.routeCode}
+                                </span>
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wide truncate">
+                                  {route.routeName}
+                                </span>
                               </div>
-                            ))
-                          )}
+                              <span className="text-[11px] text-gray-400 mt-1 block">
+                                Base fare ₱{route.baseFare.toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 space-y-2">
+                            {routeStops.length === 0 ? (
+                              <div className="text-xs text-gray-400 italic px-1 py-1">
+                                No stops listed yet for this route.
+                              </div>
+                            ) : (
+                              routeStops.map((stop) => (
+                                <div
+                                  key={stop.id}
+                                  onClick={() => onSelectPlace(stop)}
+                                  className="group w-full flex items-center justify-between gap-3 text-left text-xs font-medium px-3 py-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 cursor-pointer transition-colors"
+                                >
+                                  <span className="truncate leading-relaxed">🚐 {stop.name}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onStartNavigation(stop);
+                                    }}
+                                    className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-md transition-colors flex items-center justify-center shadow-sm"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                  )}
                 </div>
               ) : activeTab === "explore" ? (
                 <div className="space-y-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">
-                    Nearby Spots ({places.length})
-                  </h3>
+                  <div className="flex items-center justify-between px-1">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                      Nearby Spots ({places.length})
+                    </h3>
+                    {isLoadingAmenities && (
+                      <span className="flex items-center gap-1.5 text-[10px] font-semibold text-blue-500">
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                        </svg>
+                        Loading nearby places…
+                      </span>
+                    )}
+                  </div>
                   {places.length === 0 ? (
                     <div className="text-center py-8 text-gray-400 text-sm">
-                      No matching places found. Try typing a query.
+                      {isLoadingAmenities ? (
+                        <span className="flex flex-col items-center gap-2">
+                          <svg className="w-5 h-5 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                          </svg>
+                          Fetching nearby places — this can take a moment.
+                        </span>
+                      ) : (
+                        "No matching places found. Try typing a query."
+                      )}
                     </div>
                   ) : (
                     places.map((place) => (
@@ -462,7 +557,7 @@ export default function Sidebar({
                 {transitCandidates.length > 0 ? (
                   <div className="mt-1.5">
                     <span className="text-lg font-black block text-gray-900 leading-none">
-                      {transitCandidates[activeTransitIdx] ? `${Math.round(transitCandidates[activeTransitIdx].score * 4)}m` : "Calculating..."}
+                      {transitCandidates[activeTransitIdx] ? `~${Math.round(transitCandidates[activeTransitIdx].score * 4)}m` : "Calculating..."}
                     </span>
                     <span className="text-[10px] text-emerald-600 font-extrabold mt-1 block">
                       ₱{transitFareSum.toFixed(2)} • {activeTransitPlan?.transfer ? "1 Transfer" : "Direct"}
@@ -488,7 +583,7 @@ export default function Sidebar({
                 {activeDriveInfo ? (
                   <div className="mt-1.5">
                     <span className="text-lg font-black block text-gray-900 leading-none">
-                      {activeDriveInfo.durationMin}m
+                      ~{activeDriveInfo.durationMin}m
                     </span>
                     <span className="text-[10px] text-blue-600 font-extrabold mt-1 block truncate">
                       {activeDriveInfo.distanceKm} km • {activeDriveInfo.summary.substring(0, 10)}
@@ -500,6 +595,9 @@ export default function Sidebar({
               </div>
 
             </div>
+            <p className="px-3 py-1.5 text-[10px] text-gray-400 bg-gray-50/70 border-b border-gray-200">
+              ~ Times shown are approximate and may vary with traffic, waiting time, and conditions.
+            </p>
 
             {/* Sub-mode selections (tab strip) — grid, not flex+min-width,
                 so all tabs always fit the sidebar's width instead of
@@ -601,7 +699,7 @@ export default function Sidebar({
                           Route {index + 1} ({route.summary || "Main Path"})
                         </span>
                         <span>
-                          {duration} mins • {distance} km
+                          ~{duration} mins • {distance} km
                         </span>
                       </button>
                     );
@@ -638,7 +736,7 @@ export default function Sidebar({
                       >
                         <span>{label}</span>
                         <span>
-                          {route.cost[0].toFixed(1)} min • ₱{route.cost[1].toFixed(2)}
+                          ~{route.cost[0].toFixed(1)} min • ₱{route.cost[1].toFixed(2)}
                         </span>
                       </button>
                     );
