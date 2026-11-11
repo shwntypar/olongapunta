@@ -81,7 +81,7 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
     for (const edge of outEdges) {
       if (!edge.walkable) continue;
       options.push({
-        state: { node: edge.to, mode: "walk", homeZone: null, crossed: false },
+        state: { node: edge.to, mode: "walk", homeZone: null, crossed: false, entered: "" },
         minutes: (edge.distanceKm / WALK_SPEED_KMH) * 60,
         pesos: 0,
         edge,
@@ -105,7 +105,7 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
           ? Math.max(0, BOARD_WAIT_MINUTES - TERMINAL_BOARD_DISCOUNT_MINUTES)
           : BOARD_WAIT_MINUTES;
         options.push({
-          state: { node: state.node, mode: "trike", homeZone: currentNode.zoneId, crossed: false },
+          state: { node: state.node, mode: "trike", homeZone: currentNode.zoneId, crossed: false, entered: "" },
           minutes: boardMinutes,
           pesos: fare.baseFare,
           edge: null,
@@ -123,7 +123,7 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
 
   // state.mode === "trike"
   options.push({
-    state: { node: state.node, mode: "walk", homeZone: null, crossed: false },
+    state: { node: state.node, mode: "walk", homeZone: null, crossed: false, entered: "" },
     minutes: 0,
     pesos: 0,
     edge: null,
@@ -188,12 +188,19 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
     if (!foreignRule.mainRoadAllowed && edge.isMainRoad) continue; // the zone being entered governs its own roads
     const foreignPenalty = foreignRule.mainRoadPenalty ?? MAIN_ROAD_PENALTY;
 
+    const enteredZones = state.entered ? state.entered.split(",") : [];
+    const firstEntry = !enteredZones.includes(edgeZone);
     options.push({
-      state: { ...state, node: edge.to, crossed: true },
+      state: {
+        ...state,
+        node: edge.to,
+        crossed: true,
+        entered: firstEntry ? [...enteredZones, edgeZone].sort().join(",") : state.entered,
+      },
       minutes: edge.trikeMinutes * (edge.isMainRoad ? foreignPenalty : 1),
-      // The one-time surcharge is the rider's home TODA charging for letting
-      // them roam, on top of the same per-km rate that keeps accruing.
-      pesos: distanceFare + (state.crossed ? 0 : homeRule.crossFee),
+      // The crossing fee is charged once for each zone the ride crosses into
+      // (fare schedule: +₱20 per zone crossing), on top of any per-km rate.
+      pesos: distanceFare + (firstEntry ? homeRule.crossFee : 0),
       edge,
       transition: "trike-cross",
     });

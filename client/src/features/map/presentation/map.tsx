@@ -343,6 +343,9 @@ export default function MapComponent() {
   // something different for each, since the first is a coverage gap and the
   // second is the algorithm correctly concluding a trike isn't worth it.
   const [tricycleWalkOnly, setTricycleWalkOnly] = useState(false);
+  // Walking time when walking beat every tricycle option (null otherwise) — the
+  // sidebar quotes it next to the fallback tricycle route.
+  const [tricycleWalkMinutes, setTricycleWalkMinutes] = useState<number | null>(null);
   const [activeMartinsIdx, setActiveMartinsIdx] = useState<number>(0);
 
   const [visibleRouteIds, setVisibleRouteIds] = useState<string[]>(mockRoutes.map(r => r.id));
@@ -1260,6 +1263,7 @@ export default function MapComponent() {
     setMartinsRoutes([]);
     setActiveMartinsIdx(0);
     setTricycleWalkOnly(false);
+    setTricycleWalkMinutes(null);
 
     // Hide all default jeepney route overlays
     mockRoutes.forEach(route => {
@@ -1320,12 +1324,22 @@ export default function MapComponent() {
         const goalNode = nearestNode(MARTINS_NODES, [endLon, endLat]);
 
         const rawRoutes = startNode && goalNode ? findParetoRoutes(MARTINS_GRAPH, startNode.id, goalNode.id) : [];
-        const withTrike = rawRoutes.filter(requiresTricycle);
+        let withTrike = rawRoutes.filter(requiresTricycle);
+        const walkBeatsTricycle = rawRoutes.length > 0 && withTrike.length === 0;
+
+        // Short trips: walking (₱0) can be as fast as any tricycle, which leaves
+        // no tricycle in the Pareto set at all. Riders still take tricycles for
+        // short hops (heat, bags), so fall back to a search that must board at
+        // least once and show its fastest options, with a note in the sidebar.
+        if (walkBeatsTricycle && startNode && goalNode) {
+          withTrike = findParetoRoutes(MARTINS_GRAPH, startNode.id, goalNode.id, { requireRide: true }).filter(requiresTricycle);
+        }
         const routes = selectDirectAndTransfer(curateParetoRoutes(withTrike));
 
         setMartinsRoutes(routes);
         setActiveMartinsIdx(0);
-        setTricycleWalkOnly(rawRoutes.length > 0 && withTrike.length === 0);
+        setTricycleWalkOnly(walkBeatsTricycle);
+        setTricycleWalkMinutes(walkBeatsTricycle ? Math.round(rawRoutes[0].cost[0]) : null);
 
         if (routes.length === 0) {
           // No zone covers this trip — clear out whatever the previous mode left behind
@@ -1775,6 +1789,7 @@ export default function MapComponent() {
         activeMartinsIdx={activeMartinsIdx}
         setActiveMartinsIdx={setActiveMartinsIdx}
         tricycleWalkOnly={tricycleWalkOnly}
+        tricycleWalkMinutes={tricycleWalkMinutes}
 
         onCloseRouting={() => {
           setIsRoutingMode(false);
@@ -1787,6 +1802,7 @@ export default function MapComponent() {
           setMartinsRoutes([]);
           setActiveMartinsIdx(0);
           setTricycleWalkOnly(false);
+          setTricycleWalkMinutes(null);
 
           setIsolatedDirectionId(null);
           routeEndpointMarkers.current.forEach(marker => marker.remove());

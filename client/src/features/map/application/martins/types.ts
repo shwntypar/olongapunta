@@ -110,9 +110,16 @@ export interface RouteState {
   homeZone: string | null;
   /** Whether this ride's one-time cross-zone surcharge has already been paid. */
   crossed: boolean;
+  /**
+   * Other zones this ride has entered, sorted and comma-joined ("" if none).
+   * The fare schedule charges the crossing fee for EACH zone crossed into, so
+   * a ride that goes Orange → Green → Blue pays it twice — a single
+   * `crossed` flag could only charge it once.
+   */
+  entered: string;
 }
 
-export const stateKey = (s: RouteState): string => `${s.node}|${s.mode}|${s.homeZone ?? ""}|${s.crossed}`;
+export const stateKey = (s: RouteState): string => `${s.node}|${s.mode}|${s.homeZone ?? ""}|${s.entered}`;
 
 /** [minutes, pesos] — lower is better in both. */
 export type Cost = [number, number];

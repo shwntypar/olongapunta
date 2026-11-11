@@ -71,7 +71,7 @@ const GREEN_ZONE_TERMINAL_NODE_IDS = [
 export const ZONE_RULES: ZoneRules = {
   "toda-1": {
     crossTo: ["toda-2", "toda-3"], // ZONE-1 is adjacent to both (~0.04km, ~0.07km gaps)
-    crossFee: 20, // PLACEHOLDER — matches the ₱20 figure from the thesis doc's example config
+    crossFee: 20, // fare schedule: +₱20 for crossing into another zone
     mainRoadAllowed: true, // PLACEHOLDER — assume allowed-but-penalized until a zone is confirmed to ban it
     terminals: [], // PLACEHOLDER — no surveyed terminal node ids yet
     // No mainRoadPenalty override — keeps the default soft avoidance.
@@ -91,13 +91,7 @@ export const ZONE_RULES: ZoneRules = {
   },
   "toda-3": {
     crossTo: ["toda-1", "toda-2"], // ZONE-3 is adjacent to both (~0.07km, ~0.04km gaps)
-    // PLACEHOLDER, deliberately > baseFare (₱30) — Blue charges a steep
-    // premium for letting a rider continue into another TODA's turf on the
-    // same ride, instead of the flat ₱20 every other zone uses. This is
-    // what makes "alight, walk, board fresh in the next zone" genuinely
-    // cheaper than riding straight through for some trips — replace with
-    // whatever Blue's real crossing surcharge turns out to be.
-    crossFee: 35,
+    crossFee: 20, // fare schedule: +₱20 for crossing into another zone, same for every zone
     mainRoadAllowed: true,
     terminals: [],
     mainRoadPenalty: 1, // Blue — main roads treated as a normal route, not avoided
@@ -116,7 +110,7 @@ export function getZoneRule(zoneId: string) {
   return ZONE_RULES[zoneId] ?? DEFAULT_ZONE_RULE;
 }
 
-const DEFAULT_FARE = { baseFare: 30, farePerKm: 8, includedKm: 2 };
+const DEFAULT_FARE = { baseFare: 30, farePerKm: 0, includedKm: 0 }; // fare schedule: flat ₱30 per ride
 
 /** Real fare data for a zone, read straight from TricycleZoneData.ts. */
 export function getZoneFare(zoneId: string): { baseFare: number; farePerKm: number; includedKm: number } {

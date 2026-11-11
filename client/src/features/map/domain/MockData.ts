@@ -98,7 +98,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Mangan-Vaca, Subic to Olongapo',
     routeCode: 'J-08',
     reversedName: 'Olongapo to Mangan-Vaca Subic',
-    baseFare: 10.00,
+    baseFare: 13.00, // fare schedule: ₱13 regular jeepney fare
     farePerKm: 1.75,
     stops: [
       { name: 'Gordon Heights Gate', lat: 14.8500, lng: 120.2700, order: 1 },
@@ -119,7 +119,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Gordon Heights to SM Olongapo Downtown',
     routeCode: 'J-03',
     reversedName: 'SM Olongapo Downtown to Gordon Heights',
-    baseFare: 12.00,
+    baseFare: 13.00, // fare schedule: ₱13 regular jeepney fare
     farePerKm: 1.40,
     stops: [
       { name: 'Filtration', lat: 14.851620, lng: 120.288707, order: 1 },

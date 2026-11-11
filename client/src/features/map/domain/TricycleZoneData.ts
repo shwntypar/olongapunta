@@ -6,11 +6,10 @@ export interface TricycleZone {
   baseFare: number;
   farePerKm: number;
   /**
-   * Distance (km) the flat baseFare already covers before farePerKm starts
-   * adding anything — matches how PH tricycle fares actually work (a flat
-   * minimum for a typical short ride, extra per-km only once a ride goes
-   * unusually far). Without this, every ride was charged per-km from zero,
-   * even short in-zone hops a real driver would just charge ₱30 flat for.
+   * Distance (km) the flat baseFare covers before farePerKm starts adding
+   * anything. Unused under the current fare schedule (flat ₱30 per ride,
+   * farePerKm 0 in every zone); kept so a distance-based schedule can be
+   * re-encoded without touching the routing engine.
    */
   includedKm: number;
   polygon: any; // GeoJSON Polygon or MultiPolygon *geometry* (not a Feature) — [[ [lng,lat], ... ]]
@@ -23,8 +22,8 @@ export const tricycleZones: TricycleZone[] = [
     name: "Orange Tricycle Zone",
     color: "#FFA500",
     baseFare: 30,
-    farePerKm: 8,
-    includedKm: 2, // PLACEHOLDER — flat baseFare covers the first ~2km; only distance beyond that adds farePerKm
+    farePerKm: 0, // fare schedule: flat ₱30 per ride regardless of distance — no per-km charge
+    includedKm: 0,
     polygon: {
       type: "Polygon",
       "coordinates": [
@@ -106,8 +105,8 @@ export const tricycleZones: TricycleZone[] = [
     name: "Green Tricycle Zone",
     color: "#16a34a",
     baseFare: 30,
-    farePerKm: 8,
-    includedKm: 2, // PLACEHOLDER — flat baseFare covers the first ~2km; only distance beyond that adds farePerKm
+    farePerKm: 0, // fare schedule: flat ₱30 per ride regardless of distance — no per-km charge
+    includedKm: 0,
     polygon: {
       type: "Polygon",
       "coordinates": [
@@ -617,8 +616,8 @@ export const tricycleZones: TricycleZone[] = [
     name: "Blue Tricycle Zone",
     color: "#0ea5e9",
     baseFare: 30,
-    farePerKm: 8,
-    includedKm: 2, // PLACEHOLDER — flat baseFare covers the first ~2km; only distance beyond that adds farePerKm
+    farePerKm: 0, // fare schedule: flat ₱30 per ride regardless of distance — no per-km charge
+    includedKm: 0,
     polygon: {
       type: "Polygon",
       "coordinates": [
@@ -1148,8 +1147,8 @@ export const tricycleZones: TricycleZone[] = [
     name: "Light Blue Tricycle Zone",
     color: "#0ea5e9",
     baseFare: 30,
-    farePerKm: 8,
-    includedKm: 2, // PLACEHOLDER — flat baseFare covers the first ~2km; only distance beyond that adds farePerKm
+    farePerKm: 0, // fare schedule: flat ₱30 per ride regardless of distance — no per-km charge
+    includedKm: 0,
     polygon: {
       type: "Polygon",
       "coordinates": [
@@ -1388,8 +1387,8 @@ export const tricycleZones: TricycleZone[] = [
     name: "Red Tricycle Zone",
     color: "#dc2626",
     baseFare: 30,
-    farePerKm: 8,
-    includedKm: 2, // PLACEHOLDER — flat baseFare covers the first ~2km; only distance beyond that adds farePerKm
+    farePerKm: 0, // fare schedule: flat ₱30 per ride regardless of distance — no per-km charge
+    includedKm: 0,
     polygon: {
       type: "Polygon",
       "coordinates": [
