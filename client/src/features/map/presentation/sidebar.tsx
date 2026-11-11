@@ -3,8 +3,31 @@
 import React, { useEffect, useState } from "react";
 import { mockRoutes } from "../domain/MockData";
 import { tricycleZones } from "../domain/TricycleZoneData";
+import type { RouteLeg } from "../application/martins/types";
+import RouteSummaryCard, { type RouteSummary } from "./route-summary-card";
 
 export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle";
+
+// A tricycle ride at least this long (km, summed over every ride in the
+// route) shows the fuel-price note under the fare. 2 km matches the flat-fare
+// allowance (includedKm in TricycleZoneData.ts) — past it, the fare is the
+// driver's per-km call, which is where fuel prices hit the rider hardest.
+const LONG_TRICYCLE_TRIP_KM = 2;
+
+/** Length (km) of a [lon, lat][] path — haversine, no Turf needed for a display-only figure. */
+function pathLengthKm(coords: [number, number][]): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  let km = 0;
+  for (let i = 1; i < coords.length; i++) {
+    const [lon1, lat1] = coords[i - 1];
+    const [lon2, lat2] = coords[i];
+    const h =
+      Math.sin(toRad(lat2 - lat1) / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(toRad(lon2 - lon1) / 2) ** 2;
+    km += 2 * 6371 * Math.asin(Math.sqrt(h));
+  }
+  return km;
+}
 
 interface SidebarProps {
   places: any[];
@@ -43,6 +66,8 @@ interface SidebarProps {
   activeMartinsIdx?: number;
   setActiveMartinsIdx?: (idx: number) => void;
   tricycleWalkOnly?: boolean;
+  /** Walking time (min) when walking beat every tricycle option; null otherwise. */
+  tricycleWalkMinutes?: number | null;
 }
 
 export default function Sidebar({
@@ -80,6 +105,7 @@ export default function Sidebar({
   activeMartinsIdx = 0,
   setActiveMartinsIdx,
   tricycleWalkOnly = false,
+  tricycleWalkMinutes = null,
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<"explore" | "routes" | "stops">("explore");
 
@@ -153,6 +179,49 @@ export default function Sidebar({
   const tricycleBoardCount = activeMartinsRoute
     ? activeMartinsRoute.legs.filter((leg: any) => leg.transition === "board-trike").length
     : 0;
+
+  // Total distance actually ridden on a tricycle (not walked) in the active
+  // route — drives the long-trip fuel-price note below the fare summary.
+  const tricycleRideKm = activeMartinsRoute
+    ? (activeMartinsRoute.legs as RouteLeg[])
+        .filter((leg) => leg.transition === "trike-home" || leg.transition === "trike-cross")
+        .reduce((km: number, leg) => km + pathLengthKm(leg.coordinates ?? []), 0)
+    : 0;
+  const isLongTricycleTrip = tricycleRideKm >= LONG_TRICYCLE_TRIP_KM;
+
+  // One summary card for whichever modality is selected — time, distance,
+  // fare and route detail all follow the mode and the active option.
+  const activeTransitCandidate = transitCandidates[activeTransitIdx];
+  const summary: RouteSummary | null =
+    mode === "transit"
+      ? activeTransitCandidate
+        ? {
+            durationMin: Math.round(activeTransitCandidate.score * 4),
+            fare: transitFareSum,
+            note: activeTransitPlan?.transfer ? "1 transfer" : "Direct",
+            noteKind: activeTransitPlan?.transfer ? "transfer" : "direct",
+          }
+        : null
+      : mode === "tricycle"
+      ? activeMartinsRoute
+        ? {
+            durationMin: Math.round(activeMartinsRoute.cost[0]),
+            distanceKm: (activeMartinsRoute.legs as RouteLeg[])
+              .reduce((km: number, leg) => km + pathLengthKm(leg.coordinates ?? []), 0)
+              .toFixed(1),
+            fare: tricycleFareSum,
+            note: tricycleBoardCount >= 2 ? "1 transfer" : "Direct",
+            noteKind: tricycleBoardCount >= 2 ? "transfer" : "direct",
+          }
+        : null
+      : activeDriveInfo
+      ? {
+          durationMin: activeDriveInfo.durationMin,
+          distanceKm: activeDriveInfo.distanceKm,
+          note: alternativeRoutes.length > 1 ? `Route ${activeRouteIdx + 1} of ${alternativeRoutes.length}` : undefined,
+          noteKind: "alternate",
+        }
+      : null;
 
   return (
     <>
@@ -547,64 +616,25 @@ export default function Sidebar({
             {/* =============================================
                 ⚡ MULTI-MODAL COMPARISON METRICS CARD
                ============================================= */}
-            <div className="p-3 bg-gray-50/70 border-b border-gray-200 grid grid-cols-2 gap-2">
-
-              {/* Transit summary card */}
-              <div
-                onClick={() => setMode("transit")}
-                className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                  mode === "transit"
-                    ? "bg-white border-blue-500 shadow-md"
-                    : "bg-white/60 border-gray-200 hover:bg-white hover:shadow-sm"
-                }`}
-              >
-                <div className="flex items-center gap-1.5 text-xs font-black text-gray-400">
-                   Transit
-                </div>
-                {transitCandidates.length > 0 ? (
-                  <div className="mt-1.5">
-                    <span className="text-lg font-black block text-gray-900 leading-none">
-                      {transitCandidates[activeTransitIdx] ? `~${Math.round(transitCandidates[activeTransitIdx].score * 4)}m` : "Calculating..."}
-                    </span>
-                    <span className="text-[10px] text-emerald-600 font-extrabold mt-1 block">
-                      ₱{transitFareSum.toFixed(2)} • {activeTransitPlan?.transfer ? "1 Transfer" : "Direct"}
-                    </span>
-                  </div>
-                ) : (
-                  <span className="text-[10px] text-gray-400 mt-2 block italic">Not available</span>
-                )}
-              </div>
-
-              {/* Driving summary card */}
-              <div
-                onClick={() => setMode("driving")}
-                className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                  mode === "driving"
-                    ? "bg-white border-blue-500 shadow-md"
-                    : "bg-white/60 border-gray-200 hover:bg-white hover:shadow-sm"
-                }`}
-              >
-                <div className="flex items-center gap-1.5 text-xs font-black text-gray-400">
-                   Driving
-                </div>
-                {activeDriveInfo ? (
-                  <div className="mt-1.5">
-                    <span className="text-lg font-black block text-gray-900 leading-none">
-                      ~{activeDriveInfo.durationMin}m
-                    </span>
-                    <span className="text-[10px] text-blue-600 font-extrabold mt-1 block truncate">
-                      {activeDriveInfo.distanceKm} km • {activeDriveInfo.summary.substring(0, 10)}
-                    </span>
-                  </div>
-                ) : (
-                  <span className="text-[10px] text-gray-400 mt-2 block italic">Not available</span>
-                )}
-              </div>
-
-            </div>
-            <p className="px-3 py-1.5 text-[10px] text-gray-400 bg-gray-50/70 border-b border-gray-200">
-              ~ Times shown are approximate and may vary with traffic, waiting time, and conditions.
-            </p>
+            <RouteSummaryCard
+              mode={mode}
+              summary={summary}
+              // Tricycle routing is synchronous: once it has run with nothing to
+              // show, the card says why instead of spinning forever.
+              loading={routeInstructions.length === 0 && !(mode === "tricycle" && martinsRoutes.length === 0)}
+              emptyText={
+                mode === "tricycle"
+                  ? tricycleWalkOnly
+                    ? "No tricycle stop within reach — walking is faster"
+                    : "No tricycle zone covers this trip"
+                  : "No route for this mode"
+              }
+              notice={
+                mode === "tricycle" && tricycleWalkOnly && martinsRoutes.length > 0 && tricycleWalkMinutes !== null
+                  ? `Short trip — walking takes about ${tricycleWalkMinutes} min, so the tricycle mainly saves you the walk.`
+                  : undefined
+              }
+            />
 
             {/* Sub-mode selections (tab strip) — grid, not flex+min-width,
                 so all tabs always fit the sidebar's width instead of
@@ -758,7 +788,7 @@ export default function Sidebar({
                 mode === "tricycle" && martinsRoutes.length === 0 ? (
                   <div className="text-center py-12 text-gray-400 text-sm">
                     {tricycleWalkOnly
-                      ? "🚶 This trip is short enough that walking beats any tricycle option — no ride is worth the fare here."
+                      ? "🚶 No tricycle stop is within reach for this trip — walking is your best option."
                       : "🛺 No tricycle zone covers this trip yet."}
                   </div>
                 ) : (
@@ -845,6 +875,14 @@ export default function Sidebar({
                 <div className="bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-gray-600 shadow-sm flex-shrink-0">
                   Ref: {activeTransitPlan?.transfer ? "1 Transfer" : "Direct Ride"}
                 </div>
+              </div>
+            )}
+
+            {mode === "tricycle" && routeInstructions.length > 0 && activeMartinsRoute && isLongTricycleTrip && (
+              <div className="px-3 py-2.5 border-t border-amber-200 bg-amber-50 text-xs text-amber-800 leading-snug">
+                <span className="font-bold">⛽ Long tricycle ride (~{tricycleRideKm.toFixed(1)} km).</span>{" "}
+                With fuel prices up, drivers may ask for more than the ₱{tricycleFareSum.toFixed(2)} estimate on
+                longer trips. Agree on the fare with the driver before boarding.
               </div>
             )}
 
