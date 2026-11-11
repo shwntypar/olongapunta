@@ -406,7 +406,14 @@ export default function MapComponent() {
   };
 
   useEffect(() => {
-    fetchLiveLocation();
+    // Desktop browser geolocation has no real GPS to fall back on — it
+    // resolves from IP/WiFi positioning databases, which routinely lands
+    // on the ISP's own location rather than the user's, sometimes a whole
+    // city away. Auto-flying the map there and silently setting it as the
+    // origin was actively misleading. On desktop, origin is only ever set
+    // explicitly now — by dropping a pin or using the "choose on map"
+    // control next to the From: field.
+    if (isMobileDevice()) fetchLiveLocation();
   }, []);
 
   // Recalculates route immediately on parameters change

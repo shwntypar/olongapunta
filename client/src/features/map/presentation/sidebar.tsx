@@ -518,6 +518,13 @@ export default function Sidebar({
                     <span className="font-semibold text-gray-800 truncate">
                       {origin?.name || "Select starting point..."}
                     </span>
+                    <button
+                      onClick={onSelectOriginMode}
+                      className="flex-shrink-0 text-[10px] font-bold text-blue-600 hover:text-blue-700 px-1.5 py-0.5 rounded hover:bg-blue-50 transition-colors whitespace-nowrap"
+                      title="Choose starting point on the map"
+                    >
+                      {origin ? "Change" : "Choose on map"}
+                    </button>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-gray-400 w-10 flex-shrink-0">To:</span>
