@@ -1,24 +1,5 @@
 export type JeepneyColor = 'YELLOW' | 'BLUE' | 'RED' | 'GREEN' | 'ORANGE' | 'CREAM' | 'BROWN' | 'WHITE' ;
 
-// 📍 Temporary hardcoded user location (Marikit Park area) for testing
-export const USER_START_LOCATION = [120.2831, 14.8299];
-
-/** Hex colors for Mapbox line layers (jeepney coding). */
-export const JEEPNEY_COLOR_HEX: Record<JeepneyColor, string> = {
-  YELLOW: '#ca8a04',
-  BLUE: '#2563eb',
-  RED: '#dc2626',
-  GREEN: '#16a34a',
-  ORANGE: '#FFA500',
-  CREAM: '#FFFDD0',
-  BROWN: '#964B00',
-  WHITE: '#FFFFFF'
-};
-
-export function jeepneyColorToHex(color: JeepneyColor): string {
-  return JEEPNEY_COLOR_HEX[color];
-}
-
 export interface RouteStop {
   name: string;
   lat: number;

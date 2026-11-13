@@ -1,12 +1,19 @@
 // =====================================================
 // 🧭 MARTINS' ALGORITHM — SHARED TYPES
 // =====================================================
-// This module is a standalone, parallel routing engine (see README context
-// in the thesis handoff doc). It does not touch the live Overpass-based
-// tricycle/jeepney routing in getTricycleRoute.ts / zoneRoadGraph.ts — those
-// keep working as-is. This is the state-expanded, zone-constrained
-// multi-modal graph + Pareto router described there, built against a
-// precomputed graph.json instead of live network calls during search.
+// The tricycle routing engine: a state-expanded, zone-constrained road graph
+// searched with Martins' multi-criteria (time, fare) label-setting algorithm,
+// built against a precomputed graph.json so no network call happens during a
+// search. Module map:
+//
+//   graph.json           road graph, built offline by scripts/build-martins-graph.ts
+//   zoneRules.ts         per-zone rules: crossing agreements, fees, boarding points
+//   neighbors.ts         every legal move from a state, with its (minutes, pesos) cost
+//   martins.ts           the algorithm: returns the Pareto-optimal labels
+//   routeResult.ts       labels → itineraries (findParetoRoutes)
+//   curation.ts          which of those itineraries to show (display only)
+//   planTricycleTrip.ts  what the app calls: coordinates in, options out
+//   routeMetrics.ts, routeShape.ts   facts and map shapes of one itinerary
 
 export type TravelLegMode = "walk" | "jeep" | "trike";
 

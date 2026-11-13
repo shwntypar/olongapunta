@@ -2,7 +2,7 @@
 
 import React from "react";
 import { ArrowLeftRight, Bus, Info, Car, Footprints, Motorbike, MoveRight, Route, Signpost, Wallet, type LucideIcon } from "lucide-react";
-import type { TravelMode } from "./sidebar";
+import type { TravelMode } from "../domain/types";
 
 /** Lucide has no tricycle — a motorbike with a roofed sidecar, drawn in the same 24px/2px-stroke style. */
 function TricycleIcon({ className }: { className?: string }) {

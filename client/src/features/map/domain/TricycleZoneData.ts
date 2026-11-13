@@ -1,3 +1,5 @@
+import type { MultiPolygon, Polygon } from "geojson";
+
 export interface TricycleZone {
   id: string;
   code: string;   // e.g. "TODA-3" — shown on the map and in fare lookups
@@ -12,7 +14,8 @@ export interface TricycleZone {
    * re-encoded without touching the routing engine.
    */
   includedKm: number;
-  polygon: any; // GeoJSON Polygon or MultiPolygon *geometry* (not a Feature) — [[ [lng,lat], ... ]]
+  /** GeoJSON geometry (not a Feature), coordinates as [lon, lat]. */
+  polygon: Polygon | MultiPolygon;
 }
 
 export const tricycleZones: TricycleZone[] = [
