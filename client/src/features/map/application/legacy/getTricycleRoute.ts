@@ -1,5 +1,5 @@
 import * as turf from '@turf/turf';
-import { tricycleZones, TricycleZone } from '../domain/TricycleZoneData';
+import { tricycleZones, TricycleZone } from '../../domain/TricycleZoneData';
 import { findNearestRoadPoint } from './zoneRoadGraph';
 
 // =====================================================

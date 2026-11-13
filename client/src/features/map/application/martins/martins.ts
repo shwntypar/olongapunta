@@ -1,5 +1,6 @@
-import { Cost, Label, RouteLeg, RouteResult, stateKey } from "./types";
+import { Cost, Label, stateKey } from "./types";
 import { LoadedGraph, neighbors } from "./neighbors";
+import { MinHeap } from "./minHeap";
 
 // =====================================================
 // 🧭 MARTINS' LABEL-SETTING ALGORITHM
@@ -31,55 +32,6 @@ const equalCost = (a: Cost, b: Cost) => {
 };
 const lexLess = (a: Cost, b: Cost) => (a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
 
-/** Minimal binary min-heap — no external dependency needed for a two-criteria queue. */
-class MinHeap<T> {
-  private items: T[] = [];
-  constructor(private cmp: (a: T, b: T) => number) {}
-
-  get length() {
-    return this.items.length;
-  }
-
-  push(item: T) {
-    this.items.push(item);
-    this.bubbleUp(this.items.length - 1);
-  }
-
-  pop(): T | undefined {
-    if (this.items.length === 0) return undefined;
-    const top = this.items[0];
-    const last = this.items.pop()!;
-    if (this.items.length > 0) {
-      this.items[0] = last;
-      this.bubbleDown(0);
-    }
-    return top;
-  }
-
-  private bubbleUp(i: number) {
-    while (i > 0) {
-      const parent = (i - 1) >> 1;
-      if (this.cmp(this.items[i], this.items[parent]) >= 0) break;
-      [this.items[i], this.items[parent]] = [this.items[parent], this.items[i]];
-      i = parent;
-    }
-  }
-
-  private bubbleDown(i: number) {
-    const n = this.items.length;
-    for (;;) {
-      const l = i * 2 + 1;
-      const r = i * 2 + 2;
-      let smallest = i;
-      if (l < n && this.cmp(this.items[l], this.items[smallest]) < 0) smallest = l;
-      if (r < n && this.cmp(this.items[r], this.items[smallest]) < 0) smallest = r;
-      if (smallest === i) break;
-      [this.items[i], this.items[smallest]] = [this.items[smallest], this.items[i]];
-      i = smallest;
-    }
-  }
-}
-
 function pushToMap(map: Map<string, Label[]>, key: string, label: Label) {
   if (!map.has(key)) map.set(key, []);
   map.get(key)!.push(label);
@@ -95,6 +47,29 @@ function removeFromMap(map: Map<string, Label[]>, key: string, label: Label) {
 export interface MartinsOptions {
   /** Safety cap on permanent labels, in case of unexpectedly dense graph data. */
   maxLabels?: number;
+  /**
+   * Optional out-parameter for evaluation (thesis Chapter 3, "search effort").
+   * Filled in place; has no effect on the search itself.
+   */
+  stats?: MartinsStats;
+  /**
+   * Only accept itineraries that board at least one tricycle. Off by default
+   * (the evaluated algorithm). Used as a UI fallback when walking alone
+   * dominates every tricycle option on a short trip, so Tricycle mode can
+   * still show the fastest ride instead of nothing. Adds a "has ridden"
+   * dimension to every state key, so walk-only labels can no longer
+   * dominate (and prune) labels that have ridden.
+   */
+  requireRide?: boolean;
+}
+
+export interface MartinsStats {
+  /** Labels made permanent (popped from the heap, not dead) — the search-effort metric. */
+  labelsSettled: number;
+  /** Labels ever pushed onto the heap, including ones later marked dead. */
+  labelsCreated: number;
+  /** True if maxLabels stopped the search early (result may be partial). */
+  hitLabelCap: boolean;
 }
 
 /**
@@ -104,6 +79,9 @@ export interface MartinsOptions {
  */
 export function martins(graph: LoadedGraph, startNode: string, goalNode: string, options: MartinsOptions = {}): Label[] {
   const maxLabels = options.maxLabels ?? 200_000;
+  const requireRide = options.requireRide ?? false;
+  const rode = new WeakMap<Label, boolean>();
+  const keyOf = (l: Label) => (requireRide ? `${stateKey(l.state)}|${rode.get(l) ? 1 : 0}` : stateKey(l.state));
 
   const permanent = new Map<string, Label[]>();
   const temporary = new Map<string, Label[]>();
@@ -112,16 +90,23 @@ export function martins(graph: LoadedGraph, startNode: string, goalNode: string,
 
   const startLabel: Label = {
     cost: [0, 0],
-    state: { node: startNode, mode: "walk", homeZone: null, crossed: false },
+    state: { node: startNode, mode: "walk", homeZone: null, crossed: false, entered: "" },
     prev: null,
     edge: null,
     transition: "start",
     rideKm: 0,
   };
   heap.push(startLabel);
-  pushToMap(temporary, stateKey(startLabel.state), startLabel);
+  pushToMap(temporary, keyOf(startLabel), startLabel);
 
   let processed = 0;
+  let created = 1; // the start label
+  const stats = options.stats;
+  if (stats) {
+    stats.labelsSettled = 0;
+    stats.labelsCreated = 0;
+    stats.hitLabelCap = false;
+  }
 
   while (heap.length > 0) {
     const L = heap.pop()!;
@@ -129,14 +114,25 @@ export function martins(graph: LoadedGraph, startNode: string, goalNode: string,
 
     if (++processed > maxLabels) {
       console.warn("martins(): maxLabels exceeded — returning the partial Pareto set found so far");
+      if (stats) stats.hitLabelCap = true;
       break;
     }
 
-    const k = stateKey(L.state);
+    const k = keyOf(L);
     removeFromMap(temporary, k, L);
     pushToMap(permanent, k, L); // lexicographic pop ⇒ L is Pareto-optimal for its state
+    if (stats) stats.labelsSettled++;
 
-    if (L.state.node === goalNode && L.state.mode === "walk") {
+    if (L.state.node === goalNode && L.state.mode === "walk" && (!requireRide || rode.get(L))) {
+      // Labels pop in raw lexicographic order, but dominance is judged on
+      // bucketed cost. A later goal label can share an earlier result's
+      // time bucket while sitting in a cheaper fare bucket — it then
+      // bucket-dominates that earlier result (e.g. 50.42 min/₱33.42 vs
+      // 50.59 min/₱30.00). Drop such results so the returned set stays
+      // non-dominated under the same rule used for pruning (Section 2.6.3).
+      for (let i = results.length - 1; i >= 0; i--) {
+        if (dominates(L.cost, results[i].cost)) results.splice(i, 1);
+      }
       results.push(L);
       continue; // a label at the goal has no useful onward neighbors
     }
@@ -147,7 +143,8 @@ export function martins(graph: LoadedGraph, startNode: string, goalNode: string,
       // Target pruning — this label can't beat an already-found result.
       if (results.some((r) => dominates(r.cost, cost) || equalCost(r.cost, cost))) continue;
 
-      const nk = stateKey(n.state);
+      const nRode = (rode.get(L) ?? false) || n.transition === "board-trike";
+      const nk = requireRide ? `${stateKey(n.state)}|${nRode ? 1 : 0}` : stateKey(n.state);
       const existing = [...(permanent.get(nk) ?? []), ...(temporary.get(nk) ?? [])];
       if (existing.some((e) => dominates(e.cost, cost) || equalCost(e.cost, cost))) continue;
 
@@ -159,151 +156,13 @@ export function martins(graph: LoadedGraph, startNode: string, goalNode: string,
       // Reset on board/alight (a fresh ride starts at 0); accumulate while riding.
       const rideKm = n.transition === "trike-home" || n.transition === "trike-cross" ? L.rideKm + (n.edge?.distanceKm ?? 0) : 0;
       const NL: Label = { cost, state: n.state, prev: L, edge: n.edge, transition: n.transition, rideKm };
+      if (nRode) rode.set(NL, true);
       pushToMap(temporary, nk, NL);
       heap.push(NL);
+      created++;
     }
   }
 
+  if (stats) stats.labelsCreated = created;
   return results;
-}
-
-/** Walks a label's .prev chain back to the start and turns it into per-leg deltas. */
-export function rebuildLegs(goalLabel: Label): RouteLeg[] {
-  const chain: Label[] = [];
-  for (let cur: Label | null = goalLabel; cur; cur = cur.prev) chain.unshift(cur);
-
-  const legs: RouteLeg[] = [];
-  for (let i = 1; i < chain.length; i++) {
-    const prevLabel = chain[i - 1];
-    const curLabel = chain[i];
-    legs.push({
-      mode: curLabel.state.mode,
-      minutes: curLabel.cost[0] - prevLabel.cost[0],
-      pesos: curLabel.cost[1] - prevLabel.cost[1],
-      transition: curLabel.transition,
-      fromNode: prevLabel.state.node,
-      toNode: curLabel.state.node,
-      coordinates: curLabel.edge?.coordinates ?? [],
-    });
-  }
-  return legs;
-}
-
-export function toRouteResult(label: Label): RouteResult {
-  return { cost: label.cost, legs: rebuildLegs(label) };
-}
-
-/** Pareto set of routes, fastest first. */
-export function findParetoRoutes(
-  graph: LoadedGraph,
-  startNode: string,
-  goalNode: string,
-  options?: MartinsOptions
-): RouteResult[] {
-  const labels = martins(graph, startNode, goalNode, options);
-  return labels
-    .map(toRouteResult)
-    .sort((a, b) => (a.cost[0] !== b.cost[0] ? a.cost[0] - b.cost[0] : a.cost[1] - b.cost[1]));
-}
-
-/**
- * Distance-based fare (farePerKm) makes the raw Pareto frontier large — many
- * routes differing only in "walk a little more/less, pay a little less/more"
- * are all genuinely non-dominated, but showing all of them is clutter, not
- * useful choice. This samples a small, evenly-spaced subset for display —
- * always the fastest and cheapest extremes, plus a few points between —
- * without touching findParetoRoutes itself (still the full, correct set,
- * e.g. for the thesis's own "Pareto set size" evaluation metric).
- */
-/**
- * The raw Pareto set always contains a "never board" route (₱0, pure
- * walking) — it's mathematically optimal on fare, but it's not a tricycle
- * suggestion, it's "don't take a tricycle." Showing it as "Cheapest" in a
- * Tricycle-mode route list is misleading, since ₱0 trivially beats every
- * real ride. This filters it out so "Cheapest" means the cheapest route
- * that actually rides a tricycle somewhere.
- */
-export function requiresTricycle(route: RouteResult): boolean {
-  return route.legs.some((leg) => leg.transition === "board-trike");
-}
-
-// Haversine, not Turf — curateParetoRoutes is a display-only step (it never
-// touches findParetoRoutes' own output), so it deliberately stays as
-// dependency-light as the rest of this module per the thesis doc's "no
-// Turf-heavy work in the runtime search path" design note.
-function haversineKm(a: readonly number[], b: readonly number[]): number {
-  const R = 6371;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b[1] - a[1]);
-  const dLon = toRad(b[0] - a[0]);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a[1])) * Math.cos(toRad(b[1])) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-/** Walking distance covered after the last alight — how far the rider is stranded from the destination. */
-function trailingWalkKm(route: RouteResult): number {
-  let km = 0;
-  for (let i = route.legs.length - 1; i >= 0; i--) {
-    const leg = route.legs[i];
-    if (leg.mode !== "walk") break;
-    for (let j = 1; j < leg.coordinates.length; j++) km += haversineKm(leg.coordinates[j - 1], leg.coordinates[j]);
-  }
-  return km;
-}
-
-// A continuous per-km fare means the raw Pareto set is full of routes that
-// are really "the same ride, cut off a bit earlier" — riding a short extra
-// stretch instead of walking it only costs a few pesos (farePerKm is ~8-10
-// in the current placeholder data). Showing every one of those cutoff
-// points as a distinct "Balanced" option just strands the rider further
-// and further from the destination to save pocket change. If paying at
-// most WALK_TRADEOFF_PESOS more gets a route with meaningfully
-// (MIN_WALK_SAVED_KM+) less walking left at the end, prefer that one.
-const WALK_TRADEOFF_PESOS = 10;
-const MIN_WALK_SAVED_KM = 0.1;
-
-function dropsRiderTooFarOut(route: RouteResult, pool: RouteResult[]): boolean {
-  const walk = trailingWalkKm(route);
-  return pool.some((other) => {
-    if (other === route) return false;
-    const extraCost = other.cost[1] - route.cost[1];
-    if (extraCost <= 0 || extraCost > WALK_TRADEOFF_PESOS) return false;
-    return walk - trailingWalkKm(other) >= MIN_WALK_SAVED_KM;
-  });
-}
-
-export function curateParetoRoutes(routes: RouteResult[], maxCount = 4): RouteResult[] {
-  const keptEnough = routes.filter((r) => !dropsRiderTooFarOut(r, routes));
-  const pool = keptEnough.length > 0 ? keptEnough : routes;
-
-  if (pool.length <= maxCount) return pool;
-  const indices = new Set<number>();
-  for (let i = 0; i < maxCount; i++) {
-    indices.add(Math.round((i * (pool.length - 1)) / (maxCount - 1)));
-  }
-  return [...indices].sort((a, b) => a - b).map((i) => pool[i]);
-}
-
-const isTransfer = (r: RouteResult) => r.legs.filter((l) => l.transition === "board-trike").length >= 2;
-
-/**
- * Two-card display, same framing as Transit mode: Direct (one continuous
- * ride) vs Transfer (board a second trike). The cheapest-extreme pick is
- * deliberately never shown here — it's rarely the trip a rider actually
- * wants and just adds a third, lower-value option. Picks the fastest route
- * in each category (routes arrives time-sorted). Falls back to two direct
- * picks (fastest + a true time-middle one) when no transfer exists in the
- * curated set.
- */
-export function selectDirectAndTransfer(routes: RouteResult[]): RouteResult[] {
-  if (routes.length <= 1) return routes;
-  const direct = routes.filter((r) => !isTransfer(r));
-  const transfers = routes.filter(isTransfer);
-
-  const directPick = direct[0] ?? routes[0];
-  if (transfers.length > 0) return [directPick, transfers[0]];
-
-  if (direct.length <= 1) return direct.length > 0 ? direct : routes.slice(0, 1);
-  const middleIndex = Math.min(direct.length - 1, Math.max(1, Math.round((direct.length - 1) / 2)));
-  return [directPick, direct[middleIndex]];
 }

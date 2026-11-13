@@ -1,6 +1,6 @@
 import * as turf from '@turf/turf';
-import { TricycleZone } from '../domain/TricycleZoneData';
-import rawMartinsGraph from './martins/graph.json';
+import { TricycleZone } from '../../domain/TricycleZoneData';
+import rawMartinsGraph from '../martins/graph.json';
 
 // =====================================================
 // 🛺 IN-ZONE ROAD GRAPH + PATHFINDER

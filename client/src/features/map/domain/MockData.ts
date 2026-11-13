@@ -1,24 +1,5 @@
 export type JeepneyColor = 'YELLOW' | 'BLUE' | 'RED' | 'GREEN' | 'ORANGE' | 'CREAM' | 'BROWN' | 'WHITE' ;
 
-// 📍 Temporary hardcoded user location (Marikit Park area) for testing
-export const USER_START_LOCATION = [120.2831, 14.8299];
-
-/** Hex colors for Mapbox line layers (jeepney coding). */
-export const JEEPNEY_COLOR_HEX: Record<JeepneyColor, string> = {
-  YELLOW: '#ca8a04',
-  BLUE: '#2563eb',
-  RED: '#dc2626',
-  GREEN: '#16a34a',
-  ORANGE: '#FFA500',
-  CREAM: '#FFFDD0',
-  BROWN: '#964B00',
-  WHITE: '#FFFFFF'
-};
-
-export function jeepneyColorToHex(color: JeepneyColor): string {
-  return JEEPNEY_COLOR_HEX[color];
-}
-
 export interface RouteStop {
   name: string;
   lat: number;
@@ -98,7 +79,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Mangan-Vaca, Subic to Olongapo',
     routeCode: 'J-08',
     reversedName: 'Olongapo to Mangan-Vaca Subic',
-    baseFare: 10.00,
+    baseFare: 13.00, // fare schedule: ₱13 regular jeepney fare
     farePerKm: 1.75,
     stops: [
       { name: 'Gordon Heights Gate', lat: 14.8500, lng: 120.2700, order: 1 },
@@ -119,7 +100,7 @@ export const mockRoutes: JeepneyRoute[] = [
     routeName: 'Gordon Heights to SM Olongapo Downtown',
     routeCode: 'J-03',
     reversedName: 'SM Olongapo Downtown to Gordon Heights',
-    baseFare: 12.00,
+    baseFare: 13.00, // fare schedule: ₱13 regular jeepney fare
     farePerKm: 1.40,
     stops: [
       { name: 'Filtration', lat: 14.851620, lng: 120.288707, order: 1 },
