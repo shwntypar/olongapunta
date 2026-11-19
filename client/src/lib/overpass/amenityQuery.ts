@@ -5,14 +5,12 @@
 export const AMENITY_OVERPASS_QUERY = `
 [out:json][timeout:25];
 (
-  // Area 1: Olongapo City (excluding the core SBMA/Freeport zone)
-  // We set the longitude start at 120.285 to avoid the SBMA area
-  nwr["amenity"~"hospital|school|bank|restaurant|cafe|townhall|police|pharmacy|food|lodge"](14.78, 120.285, 14.88, 120.35);
-  nwr["shop"](14.78, 120.285, 14.88, 120.35);
-
-  // Area 2: North/East Olongapo (Cabalan areas)
-  nwr["amenity"~"hospital|school|bank|restaurant|cafe|townhall|police|pharmacy|food"](14.80, 120.24, 14.88, 120.285);
-  nwr["shop"](14.80, 120.24, 14.88, 120.285);
+  // One box around all of Olongapo City (its OSM boundary spans
+  // 14.806–14.921 N, 120.233–120.418 E). The box also takes in part of
+  // the SBMA Freeport; the app drops anything outside the city or inside
+  // the Freeport using the real boundaries (features/map/domain/cityBoundary.ts).
+  nwr["amenity"~"hospital|school|bank|restaurant|cafe|townhall|police|pharmacy|food|lodge"](14.80, 120.23, 14.93, 120.42);
+  nwr["shop"](14.80, 120.23, 14.93, 120.42);
 );
 out center;
   `.trim();

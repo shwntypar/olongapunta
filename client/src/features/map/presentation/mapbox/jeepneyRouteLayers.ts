@@ -1,35 +1,20 @@
 // The always-on jeepney network: one line layer per route direction.
 
 import mapboxgl from "mapbox-gl";
-import { fetchSnappedJeepneyPath } from "../../application/mapboxDirections";
 import { JEEPNEY_LINE_COLORS } from "../../domain/jeepneyColors";
 import { mockRoutes, type JeepneyRoute } from "../../domain/MockData";
-
-export type RouteDirectionKey = "fwd" | "rev";
+import { routePath, type RouteDirectionKey } from "../../domain/routeGeometry";
 
 /** Layer id for one direction of one route, e.g. "route-layer-route-3-fwd". The sidebar's direction ids use the same "<routeId>-<fwd|rev>" form. */
 const layerId = (routeId: string, direction: RouteDirectionKey) => `route-layer-${routeId}-${direction}`;
 const sourceId = (routeId: string, direction: RouteDirectionKey) => `route-source-${routeId}-${direction}`;
 
-/** The digitized path for one direction. The return direction falls back to the forward path reversed. */
-export function directionPath(route: JeepneyRoute, direction: RouteDirectionKey): [number, number][] | null {
-  if (!route.path || route.path.length < 2) return null;
-  return direction === "fwd" ? route.path : route.returnPath || [...route.path].reverse();
-}
-
-async function drawDirection(map: mapboxgl.Map, route: JeepneyRoute, direction: RouteDirectionKey) {
-  const path = directionPath(route, direction);
+function drawDirection(map: mapboxgl.Map, route: JeepneyRoute, direction: RouteDirectionKey) {
+  const path = routePath(route, direction); // road-snapped (domain/routeGeometry.ts)
   if (!path) return;
 
   try {
-    const label = `line-${direction}:${route.routeCode}`;
-    const snapped = await fetchSnappedJeepneyPath(path, label);
-    if (!snapped) console.warn(`[${label}] Rendering raw hand-drawn path — it will cut corners on some roads.`);
-    const data = {
-      type: "Feature" as const,
-      properties: {},
-      geometry: snapped ?? { type: "LineString" as const, coordinates: path },
-    };
+    const data = { type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: path } };
 
     const source = map.getSource(sourceId(route.id, direction)) as mapboxgl.GeoJSONSource | undefined;
     if (source) {
@@ -49,11 +34,11 @@ async function drawDirection(map: mapboxgl.Map, route: JeepneyRoute, direction: 
   }
 }
 
-/** Draws both directions of every jeepney route, snapped to roads. */
+/** Draws both directions of every jeepney route, along the roads. */
 export function drawAllJeepneyRoutes(map: mapboxgl.Map) {
   for (const route of mockRoutes) {
-    void drawDirection(map, route, "fwd");
-    void drawDirection(map, route, "rev");
+    drawDirection(map, route, "fwd");
+    drawDirection(map, route, "rev");
   }
 }
 

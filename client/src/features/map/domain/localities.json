@@ -1,0 +1,337 @@
+{
+  "source": "OpenStreetMap place=* nodes (© OpenStreetMap contributors, ODbL)",
+  "fetchedAt": "2026-11-18T10:49:41.937Z",
+  "bbox": "14.77,120.23,14.89,120.37",
+  "localities": [
+    {
+      "name": "Asinan",
+      "kind": "neighbourhood",
+      "lat": 14.827919,
+      "lon": 120.285293
+    },
+    {
+      "name": "Baliwet",
+      "kind": "neighbourhood",
+      "lat": 14.861477,
+      "lon": 120.328137
+    },
+    {
+      "name": "Banicain",
+      "kind": "neighbourhood",
+      "lat": 14.828496,
+      "lon": 120.275615
+    },
+    {
+      "name": "Barretto",
+      "kind": "quarter",
+      "lat": 14.851088,
+      "lon": 120.262755
+    },
+    {
+      "name": "Buena Vista Homes",
+      "kind": "neighbourhood",
+      "lat": 14.861517,
+      "lon": 120.307795
+    },
+    {
+      "name": "Calapandayan",
+      "kind": "quarter",
+      "lat": 14.873548,
+      "lon": 120.235284
+    },
+    {
+      "name": "East Bajac-bajac",
+      "kind": "quarter",
+      "lat": 14.839883,
+      "lon": 120.288187
+    },
+    {
+      "name": "East Kalayaan",
+      "kind": "neighbourhood",
+      "lat": 14.838394,
+      "lon": 120.311751
+    },
+    {
+      "name": "East Tapinac",
+      "kind": "neighbourhood",
+      "lat": 14.832839,
+      "lon": 120.28543
+    },
+    {
+      "name": "Edgewater",
+      "kind": "neighbourhood",
+      "lat": 14.786474,
+      "lon": 120.266335
+    },
+    {
+      "name": "Fiesta Communities",
+      "kind": "neighbourhood",
+      "lat": 14.887623,
+      "lon": 120.245232
+    },
+    {
+      "name": "Forest View Leisure Resisdences",
+      "kind": "neighbourhood",
+      "lat": 14.801977,
+      "lon": 120.320832
+    },
+    {
+      "name": "Gordon Heights",
+      "kind": "quarter",
+      "lat": 14.867848,
+      "lon": 120.291977
+    },
+    {
+      "name": "Holy Spirit Subdivision",
+      "kind": "neighbourhood",
+      "lat": 14.85646,
+      "lon": 120.305252
+    },
+    {
+      "name": "Ilwas",
+      "kind": "quarter",
+      "lat": 14.882083,
+      "lon": 120.236428
+    },
+    {
+      "name": "Iram",
+      "kind": "village",
+      "lat": 14.860436,
+      "lon": 120.330275
+    },
+    {
+      "name": "Kakilingan",
+      "kind": "neighbourhood",
+      "lat": 14.861784,
+      "lon": 120.33072
+    },
+    {
+      "name": "Kalaklan",
+      "kind": "quarter",
+      "lat": 14.830584,
+      "lon": 120.273839
+    },
+    {
+      "name": "Kale Hills",
+      "kind": "neighbourhood",
+      "lat": 14.839669,
+      "lon": 120.273889
+    },
+    {
+      "name": "Kalye Putol",
+      "kind": "quarter",
+      "lat": 14.889647,
+      "lon": 120.240146
+    },
+    {
+      "name": "Mabayuan",
+      "kind": "quarter",
+      "lat": 14.842876,
+      "lon": 120.282002
+    },
+    {
+      "name": "Magdalena Subdivision",
+      "kind": "neighbourhood",
+      "lat": 14.855453,
+      "lon": 120.254634
+    },
+    {
+      "name": "Maligaya Village",
+      "kind": "neighbourhood",
+      "lat": 14.866219,
+      "lon": 120.236181
+    },
+    {
+      "name": "Mampueng",
+      "kind": "hamlet",
+      "lat": 14.875835,
+      "lon": 120.328628
+    },
+    {
+      "name": "Mangan-Vaca",
+      "kind": "suburb",
+      "lat": 14.888719,
+      "lon": 120.237696
+    },
+    {
+      "name": "Marian Hills",
+      "kind": "neighbourhood",
+      "lat": 14.863039,
+      "lon": 120.264915
+    },
+    {
+      "name": "Matain",
+      "kind": "quarter",
+      "lat": 14.853584,
+      "lon": 120.243578
+    },
+    {
+      "name": "Naugsol",
+      "kind": "village",
+      "lat": 14.880076,
+      "lon": 120.2642
+    },
+    {
+      "name": "New Cabalan",
+      "kind": "suburb",
+      "lat": 14.849359,
+      "lon": 120.325817
+    },
+    {
+      "name": "New Ilalim",
+      "kind": "neighbourhood",
+      "lat": 14.834463,
+      "lon": 120.278679
+    },
+    {
+      "name": "New Kababae",
+      "kind": "neighbourhood",
+      "lat": 14.8321,
+      "lon": 120.277568
+    },
+    {
+      "name": "New Kalalake",
+      "kind": "neighbourhood",
+      "lat": 14.831059,
+      "lon": 120.288847
+    },
+    {
+      "name": "Old Cabalan",
+      "kind": "suburb",
+      "lat": 14.84879,
+      "lon": 120.314726
+    },
+    {
+      "name": "Olongapo Port",
+      "kind": "neighbourhood",
+      "lat": 14.818146,
+      "lon": 120.296354
+    },
+    {
+      "name": "Pag-asa",
+      "kind": "neighbourhood",
+      "lat": 14.82707,
+      "lon": 120.287129
+    },
+    {
+      "name": "Pastolan",
+      "kind": "village",
+      "lat": 14.813764,
+      "lon": 120.347566
+    },
+    {
+      "name": "Roosevelt",
+      "kind": "village",
+      "lat": 14.846455,
+      "lon": 120.360386
+    },
+    {
+      "name": "Saint James",
+      "kind": "neighbourhood",
+      "lat": 14.85939,
+      "lon": 120.246277
+    },
+    {
+      "name": "San Isidro",
+      "kind": "suburb",
+      "lat": 14.862406,
+      "lon": 120.25608
+    },
+    {
+      "name": "Santa Rita",
+      "kind": "quarter",
+      "lat": 14.848946,
+      "lon": 120.291133
+    },
+    {
+      "name": "Santo Tomas",
+      "kind": "suburb",
+      "lat": 14.856932,
+      "lon": 120.256423
+    },
+    {
+      "name": "Subic Bay Gateway Park",
+      "kind": "neighbourhood",
+      "lat": 14.829001,
+      "lon": 120.296294
+    },
+    {
+      "name": "Subic Homes",
+      "kind": "neighbourhood",
+      "lat": 14.800198,
+      "lon": 120.328267
+    },
+    {
+      "name": "Subic Techno Park",
+      "kind": "neighbourhood",
+      "lat": 14.79257,
+      "lon": 120.302064
+    },
+    {
+      "name": "The Village Club",
+      "kind": "neighbourhood",
+      "lat": 14.80149,
+      "lon": 120.318163
+    },
+    {
+      "name": "Tinagkan",
+      "kind": "quarter",
+      "lat": 14.873536,
+      "lon": 120.263102
+    },
+    {
+      "name": "Tipo",
+      "kind": "village",
+      "lat": 14.844387,
+      "lon": 120.349762
+    },
+    {
+      "name": "Tralala",
+      "kind": "hamlet",
+      "lat": 14.887655,
+      "lon": 120.297457
+    },
+    {
+      "name": "Triboa",
+      "kind": "neighbourhood",
+      "lat": 14.784924,
+      "lon": 120.27035
+    },
+    {
+      "name": "Upper Kalaklan",
+      "kind": "neighbourhood",
+      "lat": 14.830401,
+      "lon": 120.273079
+    },
+    {
+      "name": "Upper Mabayuan",
+      "kind": "quarter",
+      "lat": 14.856905,
+      "lon": 120.287589
+    },
+    {
+      "name": "Villa Miranda Subdivision",
+      "kind": "neighbourhood",
+      "lat": 14.858795,
+      "lon": 120.307701
+    },
+    {
+      "name": "Wawandue",
+      "kind": "quarter",
+      "lat": 14.87808,
+      "lon": 120.231077
+    },
+    {
+      "name": "West Bajac-bajac",
+      "kind": "quarter",
+      "lat": 14.842597,
+      "lon": 120.285031
+    },
+    {
+      "name": "West Tapinac",
+      "kind": "neighbourhood",
+      "lat": 14.832231,
+      "lon": 120.279943
+    }
+  ]
+}

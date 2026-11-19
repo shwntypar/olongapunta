@@ -34,6 +34,43 @@ export const GREEN_ZONE_BOARDING_SPOTS: [number, number][] = [
 
 // Nearest-graph-node id for each coordinate above (martins/graph.json,
 // current build) — see GREEN_ZONE_BOARDING_SPOTS for the source coords.
+/**
+ * Blue-zone tricycle stands, [lon, lat] — field-reported 2026-11-18. All five
+ * fall inside the Blue (toda-3) polygon (the fifth only ~17 m from the Green
+ * border). Shown on the map and in the Stops tab; NOT yet used by routing —
+ * the Blue rule below still boards on main roads, with no terminals.
+ */
+export const BLUE_ZONE_BOARDING_SPOTS: [number, number][] = [
+  [120.2833713, 14.8390494],
+  [120.2954256, 14.8528199],
+  [120.2867187, 14.8418357],
+  [120.2875303, 14.8427923],
+  [120.2859714, 14.8406723],
+];
+
+/**
+ * Orange-zone tricycle stands, [lon, lat] — field-reported 2026-11-19, all
+ * inside the Orange (toda-1) polygon (the Orange/Green border was redrawn the
+ * same day; Stop 4 sits ~1 m inside that edge). Map and Stops tab only, like
+ * the Blue stands — not used by routing.
+ */
+export const ORANGE_ZONE_BOARDING_SPOTS: [number, number][] = [
+  [120.2815198, 14.8269536],
+  [120.2792823, 14.8265196],
+  [120.2796685, 14.8277752],
+  [120.2806463, 14.832033],
+];
+
+/**
+ * Red-zone (ZONE-3A) tricycle stands, [lon, lat] — field-reported 2026-11-19,
+ * both inside the Red (toda-5) polygon. Map and Stops tab only, like the Blue
+ * and Orange stands — not used by routing.
+ */
+export const RED_ZONE_BOARDING_SPOTS: [number, number][] = [
+  [120.2906206, 14.8612934],
+  [120.2922104, 14.8605373],
+];
+
 const GREEN_ZONE_TERMINAL_NODE_IDS = [
   "1178571753",
   "1178571754",
@@ -87,6 +124,11 @@ export const ZONE_RULES: ZoneRules = {
     // real data exists for this zone.
     terminals: GREEN_ZONE_TERMINAL_NODE_IDS,
     boardOnlyAtTerminals: true,
+    // …but a rider away from every stand can still flag down a passing Green
+    // tricycle on any street, waiting longer (FLAG_DOWN_WAIT_MINUTES) instead of
+    // walking ~500 m to the nearest stand. Added 2026-11-19; remove to
+    // reproduce the original stands-only results.
+    flagDownOffStand: "anywhere",
     mainRoadPenalty: 1, // Green — main roads treated as a normal route, not avoided
   },
   "toda-3": {

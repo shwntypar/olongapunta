@@ -1,4 +1,5 @@
-import { MartinsEdge, MartinsGraph, MartinsNode, RouteState } from "./types";
+import { RUSH_HOUR_FULL_AFTER_KM, RUSH_HOUR_FULL_EXTRA_MINUTES } from "../../domain/jeepneyService";
+import { JeepLine, JeepRideEdge, MartinsEdge, MartinsGraph, MartinsNode, RouteState, Transition } from "./types";
 import { getZoneFare, getZoneRule } from "./zoneRules";
 
 // Tunable constants (placeholders — tune with field data per the thesis doc's
@@ -16,6 +17,14 @@ export const MAX_RIDE_KM = 2.5;
 // where it tips the tie toward the real, known stand instead of an
 // arbitrary point that happens to cost the same.
 export const TERMINAL_BOARD_DISCOUNT_MINUTES = 1;
+// Flagging down a passing tricycle away from any stand (zones with
+// flagDownOffStand): no queue of tricycles waiting, so a longer expected wait
+// than at a stand. Placeholder — tune with field data.
+export const FLAG_DOWN_WAIT_MINUTES = 6;
+// Jeepneys (mixed graph only). Placeholders like the tricycle ones above:
+// average speed including stops along the way, and the wait to flag one down.
+export const JEEP_SPEED_KMH = 15;
+export const JEEP_BOARD_WAIT_MINUTES = 5;
 
 export interface LoadedGraph {
   nodes: Map<string, MartinsNode>;
@@ -28,6 +37,32 @@ export interface LoadedGraph {
    * the one trunk road isn't left with no legal boarding point at all.
    */
   boardableNodes: Set<string>;
+  /** Mixed graph only (jeepneyLayer.ts): the route direction each jeepney stop belongs to. */
+  jeepStops?: Map<string, JeepLine>;
+  /** Mixed graph only: from a stop, the ride to the next stop of the same direction. */
+  jeepRides?: Map<string, JeepRideEdge>;
+  /** Mixed graph only: routes not running right now (outside their service hours) — no boarding them. Set per search. */
+  closedRoutes?: Set<string>;
+  /** Mixed graph only: no tricycle boarding (Transit mode searches jeepneys and walking only). Set per search. */
+  tricyclesOff?: boolean;
+  /** Mixed graph only: expected wait at each jeepney stop, when it differs from its line's (away from a waiting area). */
+  jeepStopWait?: Map<string, number>;
+  /** Mixed graph only: the waiting area a stop is at, or null if it isn't at one (only filled when waiting areas are known). */
+  jeepStopArea?: Map<string, string | null>;
+  /** Mixed graph only: stops where the jeepney passing can't be boarded (an outbound provincial jeepney past its terminal, a local rule). */
+  jeepNoBoard?: Set<string>;
+  /** Mixed graph only: a note for riders boarding at this stop (domain/jeepneyAreaRules.ts — e.g. "In Cabalan, take the J-06…"). */
+  jeepStopNote?: Map<string, string>;
+  /** Mixed graph only: km from the start of its route direction to each stop. */
+  jeepStopAlongKm?: Map<string, number>;
+  /** Mixed graph only: it's rush hour — jeepneys are often full past RUSH_HOUR_FULL_AFTER_KM. Set per search. */
+  rushHour?: boolean;
+}
+
+/** Rush hour: the extra wait at this stop because the jeepneys passing are often full (0 if not). */
+export function rushHourExtraMinutes(graph: LoadedGraph, stopId: string): number {
+  if (!graph.rushHour) return 0;
+  return (graph.jeepStopAlongKm?.get(stopId) ?? 0) > RUSH_HOUR_FULL_AFTER_KM ? RUSH_HOUR_FULL_EXTRA_MINUTES : 0;
 }
 
 export function loadGraph(raw: MartinsGraph): LoadedGraph {
@@ -57,8 +92,10 @@ export interface NeighborOption {
   minutes: number;
   pesos: number;
   edge: MartinsEdge | null;
-  transition: "walk" | "board-trike" | "trike-home" | "trike-cross" | "alight";
+  transition: Exclude<Transition, "start">;
 }
+
+const walkState = (node: string): RouteState => ({ node, mode: "walk", homeZone: null, crossed: false, entered: "" });
 
 /**
  * Returns every legal transition out of `state`, with its own [minutes, pesos]
@@ -81,7 +118,7 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
     for (const edge of outEdges) {
       if (!edge.walkable) continue;
       options.push({
-        state: { node: edge.to, mode: "walk", homeZone: null, crossed: false, entered: "" },
+        state: walkState(edge.to),
         minutes: (edge.distanceKm / WALK_SPEED_KMH) * 60,
         pesos: 0,
         edge,
@@ -93,17 +130,24 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
     // whichever boarding rule that zone's rule actually has: real known
     // terminals (boardOnlyAtTerminals) take priority when set, since field
     // data beats the inferred boardOnMainRoadOnly heuristic.
-    if (currentNode.zoneId) {
+    if (currentNode.zoneId && !graph.tricyclesOff) {
       const rule = getZoneRule(currentNode.zoneId);
       const isTerminal = rule.terminals?.includes(state.node) ?? false;
+      // Stand-only zones: board at a stand — or, with flagDownOffStand, flag one down on a through road (longer wait).
+      const flagDown =
+        !!rule.boardOnlyAtTerminals &&
+        !isTerminal &&
+        (rule.flagDownOffStand === "anywhere" || (rule.flagDownOffStand === "through-roads" && graph.boardableNodes.has(state.node)));
       const canBoardHere = rule.boardOnlyAtTerminals
-        ? isTerminal
+        ? isTerminal || flagDown
         : !rule.boardOnMainRoadOnly || graph.boardableNodes.has(state.node);
       if (canBoardHere) {
         const fare = getZoneFare(currentNode.zoneId);
         const boardMinutes = isTerminal
           ? Math.max(0, BOARD_WAIT_MINUTES - TERMINAL_BOARD_DISCOUNT_MINUTES)
-          : BOARD_WAIT_MINUTES;
+          : flagDown
+            ? FLAG_DOWN_WAIT_MINUTES
+            : BOARD_WAIT_MINUTES;
         options.push({
           state: { node: state.node, mode: "trike", homeZone: currentNode.zoneId, crossed: false, entered: "" },
           minutes: boardMinutes,
@@ -114,16 +158,26 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
       }
     }
 
-    // Jeepney boarding/riding is intentionally not modeled yet — the thesis
-    // doc's own open items list "Add jeepney routes and stops to the graph"
-    // as not yet done. This graph only has road edges for walk/trike so far.
+    // Jeepney stop (mixed graph only): flag down a jeepney of this stop's direction.
+    const line = graph.jeepStops?.get(state.node);
+    if (line && !graph.closedRoutes?.has(line.routeId) && !graph.jeepNoBoard?.has(state.node)) {
+      options.push({
+        state: { ...walkState(state.node), mode: "jeep" },
+        minutes: (graph.jeepStopWait?.get(state.node) ?? line.waitMinutes) + rushHourExtraMinutes(graph, state.node),
+        pesos: line.fare,
+        edge: null,
+        transition: "board-jeep",
+      });
+    }
 
     return options;
   }
 
+  if (state.mode === "jeep") return jeepNeighbors(graph, state);
+
   // state.mode === "trike"
   options.push({
-    state: { node: state.node, mode: "walk", homeZone: null, crossed: false, entered: "" },
+    state: walkState(state.node),
     minutes: 0,
     pesos: 0,
     edge: null,
@@ -145,6 +199,7 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
   const maxRideKm = homeRule?.maxRideKm ?? MAX_RIDE_KM;
 
   for (const edge of outEdges) {
+    if (edge.walkOnly) continue; // footpath to a jeepney stop, not a road
     if (rideKm + edge.distanceKm > maxRideKm) continue; // too far for one continuous ride — must alight and re-board
 
     const edgeZone = edge.zoneId;
@@ -206,5 +261,20 @@ export function neighbors(graph: LoadedGraph, state: RouteState, rideKm = 0): Ne
     });
   }
 
+  return options;
+}
+
+/** On a jeepney: get off here, or stay on to the next stop of the same direction. */
+/**
+ * On a jeepney, `crossed` means "has ridden at least one stretch" (boarding sets it false). Getting off is
+ * only possible after that: otherwise a "must ride" search could board and alight at the same stop — a
+ * 5-minute wait and a fare for no ride — and that empty "ride" would crowd the real ones out.
+ */
+function jeepNeighbors(graph: LoadedGraph, state: RouteState): NeighborOption[] {
+  const options: NeighborOption[] = state.crossed ? [{ state: walkState(state.node), minutes: 0, pesos: 0, edge: null, transition: "alight" }] : [];
+  const ride = graph.jeepRides?.get(state.node);
+  if (ride) {
+    options.push({ state: { ...state, node: ride.to, crossed: true }, minutes: ride.minutes, pesos: 0, edge: ride, transition: "jeep-ride" });
+  }
   return options;
 }

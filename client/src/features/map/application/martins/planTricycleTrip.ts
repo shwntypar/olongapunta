@@ -1,17 +1,12 @@
 // The app's entry point into the Martins engine: "give me tricycle options
 // for this trip". Everything the UI needs is decided here.
 
-import rawGraph from "./graph.json";
 import { curateParetoRoutes, requiresTricycle, selectDirectAndTransfer } from "./curation";
-import { loadGraph } from "./neighbors";
+import { withEndWalks } from "./endWalks";
 import { findParetoRoutes } from "./routeResult";
 import { nearestNode } from "./snapToNode";
-import type { MartinsGraph, RouteResult } from "./types";
-
-// Built once at module load — graph.json is several MB, no reason to re-parse
-// it or rebuild the adjacency map on every route request.
-const GRAPH = loadGraph(rawGraph as unknown as MartinsGraph);
-const NODES = [...GRAPH.nodes.values()];
+import { ROAD_GRAPH as GRAPH, ROAD_NODES as NODES } from "./roadGraph";
+import type { RouteResult } from "./types";
 
 export interface TricycleTripPlan {
   /** Options to show, fastest first: the Direct ride and, when one exists, a Transfer. Empty if no tricycle can serve the trip. */
@@ -46,7 +41,8 @@ export function planTricycleTrip(origin: number[], destination: number[]): Tricy
   }
 
   return {
-    routes: selectDirectAndTransfer(curateParetoRoutes(tricycleRoutes)),
+    // With the stretches between the pins and the road network added (endWalks.ts).
+    routes: selectDirectAndTransfer(curateParetoRoutes(tricycleRoutes)).map((r) => withEndWalks(r, origin, startNode, destination, goalNode)),
     walkBeatsTricycle,
     walkMinutes: walkBeatsTricycle ? Math.round(paretoRoutes[0].cost[0]) : null,
   };

@@ -1,6 +1,6 @@
 // Turns the labels Martins' search returns into itineraries the app can show.
 
-import { Label, RouteLeg, RouteResult } from "./types";
+import { JeepRideEdge, Label, RouteLeg, RouteResult } from "./types";
 import { LoadedGraph } from "./neighbors";
 import { martins, type MartinsOptions } from "./martins";
 
@@ -21,6 +21,7 @@ export function rebuildLegs(goalLabel: Label): RouteLeg[] {
       fromNode: prevLabel.state.node,
       toNode: curLabel.state.node,
       coordinates: curLabel.edge?.coordinates ?? [],
+      line: curLabel.edge && "line" in curLabel.edge ? (curLabel.edge as JeepRideEdge).line : undefined,
     });
   }
   return legs;

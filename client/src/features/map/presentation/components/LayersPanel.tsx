@@ -4,10 +4,17 @@
 import { useState } from "react";
 import { JEEPNEY_LINE_COLORS } from "../../domain/jeepneyColors";
 import { mockRoutes, type JeepneyColor } from "../../domain/MockData";
-import { tricycleZones } from "../../domain/TricycleZoneData";
+import { tricycleZonesByCode } from "../../domain/TricycleZoneData";
 import { LayersIcon } from "./icons";
 
 const routeIdsOfColor = (color: string) => mockRoutes.filter((r) => r.colorCode === color).map((r) => r.id);
+
+/** Too pale to read as text on white (cream, white): such chips use dark text and an outlined dot. */
+function isPale(hex: string): boolean {
+  const n = parseInt(hex.replace("#", "").padEnd(6, "0").slice(0, 6), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return 0.299 * r + 0.587 * g + 0.114 * b > 200;
+}
 
 function ToggleChip({ label, color, active, labelClass, onClick }: { label: string; color: string; active: boolean; labelClass: string; onClick: () => void }) {
   return (
@@ -16,9 +23,12 @@ function ToggleChip({ label, color, active, labelClass, onClick }: { label: stri
       className={`px-3 py-1.5 rounded-full font-semibold text-xs whitespace-nowrap transition-all flex items-center gap-1.5 border ${
         active ? "bg-gray-50 text-gray-900 border-current" : "bg-white text-gray-400 border-gray-200 hover:border-gray-300 hover:text-gray-600"
       }`}
-      style={{ color: active ? color : undefined }}
+      style={{ color: active ? (isPale(color) ? "#374151" : color) : undefined }}
     >
-      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color, opacity: active ? 1 : 0.4 }} />
+      <div
+        className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isPale(color) ? "ring-1 ring-gray-400" : ""}`}
+        style={{ backgroundColor: color, opacity: active ? 1 : 0.4 }}
+      />
       <span className={labelClass}>{label}</span>
     </button>
   );
@@ -41,17 +51,18 @@ export default function LayersPanel({
   onSetAllRoutesVisible,
   visibleZoneIds,
   onToggleZone,
-  onShowAllZones,
+  onSetAllZonesVisible,
 }: {
   visibleRouteIds: string[];
   onToggleRouteColor: (color: JeepneyColor) => void;
   onSetAllRoutesVisible: (visible: boolean) => void;
   visibleZoneIds: string[];
   onToggleZone: (zoneId: string) => void;
-  onShowAllZones: () => void;
+  onSetAllZonesVisible: (visible: boolean) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const allRoutesVisible = mockRoutes.every((r) => visibleRouteIds.includes(r.id));
+  const allZonesVisible = tricycleZonesByCode.every((z) => visibleZoneIds.includes(z.id));
 
   return (
     <div className="relative flex-shrink-0">
@@ -95,11 +106,15 @@ export default function LayersPanel({
               </div>
             </div>
 
-            {tricycleZones.length > 0 && (
+            {tricycleZonesByCode.length > 0 && (
               <div className="pt-3.5 border-t border-gray-100">
-                <SectionHeader title="Tricycle Zones" actionLabel="Show all" onAction={onShowAllZones} />
+                <SectionHeader
+                  title="Tricycle Zones"
+                  actionLabel={allZonesVisible ? "Hide all" : "Show all"}
+                  onAction={() => onSetAllZonesVisible(!allZonesVisible)}
+                />
                 <div className="flex flex-wrap gap-1.5">
-                  {tricycleZones.map((zone) => {
+                  {tricycleZonesByCode.map((zone) => {
                     const active = visibleZoneIds.includes(zone.id);
                     return (
                       <ToggleChip

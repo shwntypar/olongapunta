@@ -1,6 +1,8 @@
 // How each kind of place looks: its colour and icon. Shared by the map
 // markers and the place lists so a hospital is the same red everywhere.
 
+import { tricycleZones } from "../domain/TricycleZoneData";
+
 const CROSS = "M12 6v12 M6 12h12";
 const SHIELD = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z";
 const CAP = "M22 10v6M2 10l10-5 10 5-10 5z M6 12v5c0 2 2 3 6 3s6-1 6-3v-5";
@@ -42,6 +44,19 @@ const COLOR_GROUPS: [string, string[]][] = [
   ["#16a34a", ["tricycle_stand"]],
   ["#7c3aed", ["jeepney_stop"]],
 ];
+
+/**
+ * The colour for one place: a tricycle stand takes its zone's colour (the
+ * colour of that TODA's tricycles and of the zone outline on the map), so a
+ * Blue-zone stop is blue; everything else takes its category colour.
+ */
+export function placeColor(place: { type: string; zoneId?: string }): string {
+  if (place.type === "tricycle_stand" && place.zoneId) {
+    const zone = tricycleZones.find((z) => z.id === place.zoneId);
+    if (zone) return zone.color;
+  }
+  return categoryColor(place.type);
+}
 
 export function categoryColor(type: string): string {
   const t = (type || "").toLowerCase();

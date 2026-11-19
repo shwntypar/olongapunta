@@ -7,6 +7,8 @@ import type { LineGeometry } from "../../domain/types";
 
 const LINE_SOURCE = "active-route";
 const LINE_LAYER = "active-route-layer";
+/** A thin dark edge under the ride lines, so pale fleets (White, Cream) stay visible on the light map. */
+const CASING_LAYER = "active-route-casing";
 const DOT_SOURCE = "active-route-walk-dots";
 const DOT_LAYER = "active-route-walk-dots-layer";
 /** Walking legs render as dots this far apart (Google Maps style), so they never read as a ride. */
@@ -35,10 +37,18 @@ export function showRouteLines(map: mapboxgl.Map, lines: RouteLine[]) {
     map.setPaintProperty(LINE_LAYER, "line-color", ["get", "color"]);
     map.setPaintProperty(LINE_LAYER, "line-dasharray", ["get", "dashArray"]);
     map.setLayoutProperty(LINE_LAYER, "visibility", visibility);
+    if (map.getLayer(CASING_LAYER)) map.setLayoutProperty(CASING_LAYER, "visibility", visibility);
     return;
   }
 
   map.addSource(LINE_SOURCE, { type: "geojson", data });
+  map.addLayer({
+    id: CASING_LAYER,
+    type: "line",
+    source: LINE_SOURCE,
+    layout: { "line-join": "round", "line-cap": "round", visibility },
+    paint: { "line-color": "#374151", "line-width": 8.5, "line-opacity": 0.55 },
+  });
   map.addLayer({
     id: LINE_LAYER,
     type: "line",
@@ -49,7 +59,7 @@ export function showRouteLines(map: mapboxgl.Map, lines: RouteLine[]) {
 }
 
 export function hideRouteLines(map: mapboxgl.Map) {
-  if (map.getLayer(LINE_LAYER)) map.setLayoutProperty(LINE_LAYER, "visibility", "none");
+  for (const layer of [CASING_LAYER, LINE_LAYER]) if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", "none");
 }
 
 function walkDots(geometries: LineGeometry[]) {

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { SHOW_JEEPNEY_STOPS } from "../../../config";
 import { JEEPNEY_SWATCH_COLORS } from "../../../domain/jeepneyColors";
 import { mockRoutes } from "../../../domain/MockData";
-import { tricycleZones } from "../../../domain/TricycleZoneData";
+import { tricycleZonesByCode } from "../../../domain/TricycleZoneData";
 import type { Place } from "../../../domain/types";
 import { formatZoneFare } from "../../../domain/zoneFare";
 import NavigateButton from "../NavigateButton";
@@ -45,8 +45,12 @@ function StopGroup({ color, code, name, fare, stops, icon, emptyText, onSelectPl
               onClick={() => onSelectPlace(stop)}
               className="group w-full flex items-center justify-between gap-3 text-left text-xs font-medium px-3 py-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 cursor-pointer transition-colors"
             >
-              <span className="truncate leading-relaxed">
-                {icon} {stop.name}
+              <span className="min-w-0 leading-relaxed">
+                <span className="block truncate">
+                  {icon} {stop.name}
+                </span>
+                {/* Where it is — the zone is already the group's heading, so drop it from the label. */}
+                {stop.where && <span className="block truncate text-[11px] font-normal text-gray-400">{stop.where.replace(/^[^·]* zone · /, "")}</span>}
               </span>
               <NavigateButton size="sm" onClick={() => onStartNavigation(stop)} />
             </div>
@@ -80,12 +84,12 @@ export default function StopsList({
   return (
     <div className="space-y-7">
       <Section title="Tricycle Zones & Stops">
-        {tricycleZones.map((zone) => (
+        {tricycleZonesByCode.map((zone) => (
           <StopGroup
             key={zone.id}
             color={zone.color}
             code={zone.code}
-            name={zone.name}
+            name={zone.area ? `${zone.name} · ${zone.area}` : zone.name}
             fare={formatZoneFare(zone)}
             stops={places.filter((p) => p.type === "tricycle_stand" && p.zoneId === zone.id)}
             icon="🛺"
