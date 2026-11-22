@@ -1,8 +1,9 @@
-// A titled list of selectable options (alternate routes, jeepney transfers, tricycle options).
+// A titled list of selectable options (alternate routes, jeepney transfers, tricycle and mixed options).
 
 const TONES = {
   blue: { section: "bg-gray-50/60", title: "text-gray-400", selected: "bg-blue-50 border-blue-400 text-blue-700 font-bold" },
   violet: { section: "bg-violet-50/60", title: "text-violet-400", selected: "bg-violet-50 border-violet-400 text-violet-700 font-bold" },
+  rose: { section: "bg-rose-50/60", title: "text-rose-400", selected: "bg-rose-50 border-rose-400 text-rose-700 font-bold" },
 } as const;
 
 export interface OptionItem {

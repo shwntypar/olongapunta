@@ -1,7 +1,7 @@
 import type { TravelMode } from "../../../domain/types";
 
-const MODES: TravelMode[] = ["driving", "walking", "cycling", "transit", "tricycle"];
-const LABEL: Record<TravelMode, string> = { driving: "Driving", walking: "Walking", cycling: "Motor", transit: "Transit", tricycle: "Tricycle" };
+const MODES: TravelMode[] = ["driving", "walking", "cycling", "transit", "tricycle", "mixed"];
+const LABEL: Record<TravelMode, string> = { driving: "Driving", walking: "Walking", cycling: "Motor", transit: "Transit", tricycle: "Tricycle", mixed: "Mixed" };
 
 /**
  * Travel-mode buttons. A destination can exclude modes that make no sense for

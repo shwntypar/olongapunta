@@ -1,8 +1,10 @@
 // Shared data shapes for the map feature.
 
 import type { JeepneyRoute } from "./MockData";
+import type { PlaceDetails } from "./placeDetails";
 
-export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle";
+/** "mixed" = tricycle + jeepney + walking in one trip (planMixedTrip.ts). */
+export type TravelMode = "driving" | "walking" | "cycling" | "transit" | "tricycle" | "mixed";
 
 /** A GeoJSON LineString geometry, coordinates as [lon, lat]. */
 export interface LineGeometry {
@@ -23,6 +25,10 @@ export interface Place {
   routeId?: string;
   /** Travel modes that make no sense for this destination (e.g. a tricycle ride to a tricycle stand). */
   excludeModes?: TravelMode[];
+  /** OpenStreetMap amenities: address, hours, contacts and other facts from the place's tags. */
+  details?: PlaceDetails;
+  /** Where it is, in a few words ("Rizal Avenue, East Bajac-bajac", "near Barretto") — tells same-name places apart. */
+  where?: string;
 }
 
 /** Where the trip starts. coords = [lon, lat]. */
@@ -48,8 +54,8 @@ export interface TransitLeg {
 /** A jeepney itinerary: one ride, or two rides with a walking transfer between them. */
 export interface TransitCandidate extends TransitLeg {
   walkDistanceMeters: number;
-  /** Lower is better: ride km + 3 × walking km (+ a transfer penalty). */
-  score: number;
+  /** Estimated door-to-door minutes: walking + waiting + riding (transitCandidates.ts). */
+  minutes: number;
   transfer?: TransitLeg;
 }
 

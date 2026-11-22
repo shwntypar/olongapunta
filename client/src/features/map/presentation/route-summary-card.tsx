@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { ArrowLeftRight, Bus, Info, Car, Footprints, Motorbike, MoveRight, Route, Signpost, Wallet, type LucideIcon } from "lucide-react";
+import { ArrowLeftRight, Bus, Info, Car, Footprints, Motorbike, MoveRight, Route, Signpost, Wallet, Waypoints, type LucideIcon } from "lucide-react";
 import type { TravelMode } from "../domain/types";
 
 /** Lucide has no tricycle — a motorbike with a roofed sidecar, drawn in the same 24px/2px-stroke style. */
@@ -36,6 +36,7 @@ const THEMES: Record<TravelMode, ModeTheme> = {
   cycling: { label: "Motor", Icon: Motorbike, tile: "bg-amber-50 text-amber-600 ring-amber-100", accent: "text-amber-600", chip: "bg-amber-50 text-amber-700" },
   tricycle: { label: "Tricycle", Icon: TricycleIcon, tile: "bg-violet-50 text-violet-600 ring-violet-100", accent: "text-violet-600", chip: "bg-violet-50 text-violet-700" },
   transit: { label: "Jeepney", Icon: Bus, tile: "bg-teal-50 text-teal-600 ring-teal-100", accent: "text-teal-600", chip: "bg-teal-50 text-teal-700" },
+  mixed: { label: "Mixed Trip", Icon: Waypoints, tile: "bg-rose-50 text-rose-600 ring-rose-100", accent: "text-rose-600", chip: "bg-rose-50 text-rose-700" },
 };
 
 export interface RouteSummary {

@@ -2,7 +2,6 @@
 
 import { MAPBOX_TOKEN } from "../config";
 import type { DirectionsRoute, LineGeometry, TravelMode } from "../domain/types";
-import { getDistanceMeters } from "./geo";
 
 const DIRECTIONS_URL = "https://api.mapbox.com/directions/v5/mapbox";
 
@@ -55,42 +54,5 @@ export async function fetchSnappedJeepneyPath(path: number[][], label?: string):
   } catch (error) {
     console.error(`${tag}Error fetching exact jeepney path:`, error);
     return null;
-  }
-}
-
-function straightLineLeg(start: number[], end: number[]): DirectionsRoute {
-  return {
-    distance: getDistanceMeters(start, end),
-    geometry: { type: "LineString", coordinates: [start, end] },
-    legs: [{ steps: [] }],
-  };
-}
-
-/**
- * A walking leg (to a boarding point, between rides, or to the destination).
- * If Mapbox fails or finds no walkable path, falls back to a straight line
- * rather than leaving the route half-drawn.
- */
-export async function fetchWalkingLeg(start: number[], end: number[], label: string): Promise<DirectionsRoute> {
-  const tag = `[walk:${label}]`;
-  try {
-    const url = `${DIRECTIONS_URL}/walking/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&steps=true&overview=full&access_token=${MAPBOX_TOKEN}`;
-    const res = await fetch(url);
-
-    if (!res.ok) {
-      console.warn(`${tag} Mapbox walking request failed (HTTP ${res.status}). Falling back to a straight line.`);
-      return straightLineLeg(start, end);
-    }
-
-    const data = await res.json();
-    if (data.code !== "Ok" || !data.routes?.[0]?.geometry) {
-      console.warn(`${tag} Mapbox could not find a walking path (code: ${data.code}). Falling back to a straight line.`, data.message);
-      return straightLineLeg(start, end);
-    }
-
-    return data.routes[0];
-  } catch (error) {
-    console.error(`${tag} Error fetching walking leg:`, error);
-    return straightLineLeg(start, end);
   }
 }

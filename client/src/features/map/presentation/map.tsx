@@ -10,7 +10,7 @@
 //   mapbox/          everything drawn on the map (markers, route lines, zones)
 //   routeDrawing/    what to draw for an itinerary in each travel mode
 //   components/      floating controls (search, layers, banners)
-//   ../application/  routing: Mapbox Directions, jeepney matcher, Martins (tricycle)
+//   ../application/  routing: Mapbox Directions, jeepney matcher, Martins (tricycle, mixed)
 //   ../domain/       data: routes, zones, places, shared types
 
 import { useEffect, useRef, useState } from "react";
@@ -18,35 +18,39 @@ import { createPortal } from "react-dom";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-import { findTransitRouteCandidates } from "../application/jeepney/transitCandidates";
+import { routesNotRunning, TRIP_MIN_SAVING_MIN } from "../application/jeepney/transitCandidates";
 import { fetchRoadRoutes } from "../application/mapboxDirections";
+import { requestMixedTrip } from "../application/martins/mixedTripClient";
+import { NO_MIXED_PLAN, type MixedTripPlan } from "../application/martins/planMixedTrip";
 import { NO_TRICYCLE_PLAN, planTricycleTrip, type TricycleTripPlan } from "../application/martins/planTricycleTrip";
 import { DEFAULT_CITY_CENTER, DEFAULT_ZOOM, MAP_STYLE, MAPBOX_TOKEN, SHOW_JEEPNEY_STOPS } from "../config";
 import { JEEPNEY_LINE_COLORS } from "../domain/jeepneyColors";
 import { mockRoutes, type JeepneyColor } from "../domain/MockData";
-import { JEEPNEY_STOP_PLACES, matchesSearch, parseAmenities, TRICYCLE_STAND_PLACES } from "../domain/places";
+import { describeStandLocations, JEEPNEY_STOP_PLACES, parseAmenities, searchPlaces, TRICYCLE_STAND_PLACES } from "../domain/places";
+import { routePath, type RouteDirectionKey } from "../domain/routeGeometry";
 import { tricycleZones } from "../domain/TricycleZoneData";
-import type { DirectionsRoute, DirectionsStep, Origin, Place, TransitCandidate, TravelMode } from "../domain/types";
+import type { JeepneyRoute } from "../domain/MockData";
+import type { DirectionsRoute, DirectionsStep, Origin, Place, TravelMode } from "../domain/types";
 import { isMobileDevice } from "../utils/device";
 import { getCurrentCoords, reverseGeocode } from "../utils/geolocation";
 
-import AmenityPopupBox from "./AmenityPopupBox";
 import LayersPanel from "./components/LayersPanel";
 import MapBanner from "./components/MapBanner";
 import SearchBox from "./components/SearchBox";
 import { hideActiveRoute, setWalkDotsVisible } from "./mapbox/activeRouteLayers";
-import { directionPath, drawAllJeepneyRoutes, hideJeepneyRoutes, showJeepneyRoutes, type RouteDirectionKey } from "./mapbox/jeepneyRouteLayers";
-import { addPlaceMarker, POPUP_PORTAL_ID, updatePlaceMarkerVisibility } from "./mapbox/placeMarkers";
+import { drawAllJeepneyRoutes, hideJeepneyRoutes, showJeepneyRoutes } from "./mapbox/jeepneyRouteLayers";
+import { addPlaceMarker, closeAllPopups, openPlacePopup, POPUP_PORTAL_ID, updatePlaceMarkerVisibility } from "./mapbox/placeMarkers";
 import { addDestinationMarker, addRouteEndpointPins, addUserMarker, removeMarkers } from "./mapbox/routeMarkers";
 import { drawZone, showZones } from "./mapbox/zoneLayers";
 import MobileSheet from "./mobile/MobileSheet";
-import { mapViewPadding } from "./mobile/sheetLayout";
+import { mapViewPadding, usesBottomSheet } from "./mobile/sheetLayout";
 import { paintRouteDrawing } from "./routeDrawing/paintRouteDrawing";
 import { roadRouteSteps, showRoadRoute } from "./routeDrawing/roadRoute";
-import { buildTransitDrawing } from "./routeDrawing/transitRoute";
+import { buildMixedDrawing } from "./routeDrawing/mixedRoute";
 import { buildTricycleDrawing } from "./routeDrawing/tricycleRoute";
 import type { RouteDrawing } from "./routeDrawing/types";
 import type { PanelProps } from "./panels/types";
+import PlaceDetailsCard from "./placeDetails/PlaceDetailsCard";
 import Sidebar from "./sidebar";
 
 mapboxgl.accessToken = MAPBOX_TOKEN;
@@ -57,12 +61,25 @@ const PLACE_FOCUS_ZOOM = 17; // amenity markers only appear from 16.5 up (see pl
 const ON_LOAD_GPS_TIMEOUT_MS = 15000; // first-time permission prompts often take longer than 5s to answer
 const NAVIGATION_GPS_TIMEOUT_MS = 10000;
 
+/** No jeepney found, or the best one doesn't beat walking by TRIP_MIN_SAVING_MIN — Transit then notes the walk and suggests other ways. */
+function savesLittle(plan: MixedTripPlan): boolean {
+  const best = plan.routes[0];
+  return !best || (plan.walkMinutes !== null && best.cost[0] > plan.walkMinutes - TRIP_MIN_SAVING_MIN);
+}
+
 export default function MapComponent() {
   // ---- Places and search ----
   const [places, setPlaces] = useState<Place[]>([]);
   const [isLoadingAmenities, setIsLoadingAmenities] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  /** The place being browsed — and, in directions mode, the trip's destination. */
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
+  /**
+   * Directions mode only: another place whose card is open because its marker
+   * was tapped. Looking at it never changes the trip; its card's "Get
+   * Directions" does, on purpose.
+   */
+  const [peekPlace, setPeekPlace] = useState<Place | null>(null);
 
   // ---- Trip origin ----
   const [origin, setOrigin] = useState<Origin | null>(null);
@@ -77,10 +94,19 @@ export default function MapComponent() {
   const [drawnSteps, setDrawnSteps] = useState<DirectionsStep[]>([]);
   const [roadRoutes, setRoadRoutes] = useState<DirectionsRoute[]>([]); // driving / walking / motor
   const [activeRoadIdx, setActiveRoadIdx] = useState(0);
-  const [transitCandidates, setTransitCandidates] = useState<TransitCandidate[]>([]);
+  /** Transit: jeepney-only trips from the network search (any number of transfers). */
+  const [transitPlan, setTransitPlan] = useState<MixedTripPlan>(NO_MIXED_PLAN);
+  const [isPlanningTransit, setIsPlanningTransit] = useState(false);
+  /** Routes that would serve the trip but aren't running at this hour. */
+  const [transitNotRunning, setTransitNotRunning] = useState<JeepneyRoute[]>([]);
+  /** On the Transit tab, when no jeepney clearly wins: the fastest tricycle, to offer instead. */
+  const [transitTricycle, setTransitTricycle] = useState<{ minutes: number; fare: number } | null>(null);
   const [activeTransitIdx, setActiveTransitIdx] = useState(0);
   const [tricyclePlan, setTricyclePlan] = useState<TricycleTripPlan>(NO_TRICYCLE_PLAN);
   const [activeTricycleIdx, setActiveTricycleIdx] = useState(0);
+  const [mixedPlan, setMixedPlan] = useState<MixedTripPlan>(NO_MIXED_PLAN);
+  const [activeMixedIdx, setActiveMixedIdx] = useState(0);
+  const [isPlanningMixed, setIsPlanningMixed] = useState(false);
 
   // ---- Map layers and layout ----
   const [visibleRouteIds, setVisibleRouteIds] = useState<string[]>(ALL_ROUTE_IDS);
@@ -97,8 +123,14 @@ export default function MapComponent() {
   const routeEndpointPins = useRef<mapboxgl.Marker[]>([]); // Start/End of an isolated jeepney route
   /** Read inside the map's click handler, which is registered once and would otherwise see stale state. */
   const isPickingOriginRef = useRef(false);
+  /** Same, for directions mode (read by the marker click handler). */
+  const isRoutingModeRef = useRef(false);
+  /** A trip is on screen: place markers stay hidden (read on every zoom/pan by the map's visibility refresh). */
+  const hidePlaceMarkersRef = useRef(false);
   /** Increments on every route draw; an async draw that finishes after a newer one started is discarded. */
   const drawGeneration = useRef(0);
+  /** Increments on every route request; an async result for an older request is discarded. */
+  const routeRequest = useRef(0);
 
   // =====================================================
   // Origin: GPS and dropped pins
@@ -136,16 +168,40 @@ export default function MapComponent() {
     isPickingOriginRef.current = isPickingOrigin;
   }, [isPickingOrigin]);
 
+  useEffect(() => {
+    isRoutingModeRef.current = isRoutingMode;
+  }, [isRoutingMode]);
+
+  // While a trip is shown, hide the place markers — only the trip's own pins and labels stay. They stay
+  // visible while choosing the start, so a stand or shop can be tapped to start from it.
+  useEffect(() => {
+    hidePlaceMarkersRef.current = isRoutingMode && !isPickingOrigin;
+    if (map.current) updatePlaceMarkerVisibility(placeMarkers.current, map.current.getZoom(), hidePlaceMarkersRef.current);
+  }, [isRoutingMode, isPickingOrigin]);
+
+  // The always-on jeepney network: shown while browsing, hidden while showing a trip (it would bury the trip's route).
+  // The one place that decides this — layer toggles and closing cards no longer bring it back mid-trip.
+  useEffect(() => {
+    const currentMap = map.current;
+    if (!currentMap) return; // layers not drawn yet are skipped inside show/hide
+    if (isRoutingMode) hideJeepneyRoutes(currentMap);
+    else showJeepneyRoutes(currentMap, visibleRouteIds, isolatedDirectionId);
+  }, [isRoutingMode, visibleRouteIds, isolatedDirectionId]);
+
   // =====================================================
   // Starting, running and closing a trip
   // =====================================================
 
   const startNavigationFlow = (place: Place) => {
+    closeAllPopups(); // the place card would cover the route
+    setPeekPlace(null);
     setSelectedPlace(place);
     setIsRoutingMode(true);
     // Some destinations exclude a mode (a tricycle stand excludes Tricycle).
     if (place.excludeModes?.includes(travelMode)) setTravelMode("transit");
 
+    // Already showing a trip (switching destination from a peeked card): keep the start the rider chose.
+    if (isRoutingMode && origin) return;
     if (isMobileDevice()) void setOriginFromGps();
     else setIsPickingOrigin(true); // the "Click anywhere on the map…" banner explains what to do
   };
@@ -168,21 +224,43 @@ export default function MapComponent() {
     const currentMap = map.current;
     const end: [number, number] = [Number(place.lon), Number(place.lat)];
     if (!currentMap || isNaN(end[0]) || isNaN(end[1])) return;
+    const requestId = ++routeRequest.current;
 
     clearRoutePills();
     setDrawnSteps([]);
     setRoadRoutes([]);
+    setTransitPlan(NO_MIXED_PLAN);
+    setIsPlanningTransit(false);
+    setTransitNotRunning([]);
+    setTransitTricycle(null);
+    setActiveTransitIdx(0);
     setTricyclePlan(NO_TRICYCLE_PLAN);
     setActiveTricycleIdx(0);
-    hideJeepneyRoutes(currentMap);
+    setMixedPlan(NO_MIXED_PLAN);
+    setActiveMixedIdx(0);
+    setIsPlanningMixed(false);
     destinationMarker.current?.remove();
     destinationMarker.current = addDestinationMarker(currentMap, end);
 
     try {
-      // Jeepney options are always computed: the summary card shows them in every mode.
-      setTransitCandidates(findTransitRouteCandidates(start, end));
-      setActiveTransitIdx(0);
-      if (mode === "transit") return;
+      if (mode === "transit") {
+        // The same network search as Mixed with tricycles off: jeepney trips with any number of
+        // transfers, walking on real streets. Runs in the Web Worker; the same trip asked again is reused.
+        drawGeneration.current++;
+        hideActiveRoute(currentMap);
+        setIsPlanningTransit(true);
+        const plan = await requestMixedTrip(start, end, { tricycles: false });
+        if (requestId !== routeRequest.current) return; // the trip or mode changed while it ran
+        setTransitPlan(plan);
+        setTransitNotRunning(routesNotRunning(start, end, new Date()));
+        if (savesLittle(plan)) {
+          // Not just "walk": also offer the tricycle, with its time and fare (fast — tens of ms).
+          const fastest = planTricycleTrip(start, end).routes[0];
+          setTransitTricycle(fastest ? { minutes: Math.round(fastest.cost[0]), fare: fastest.cost[1] } : null);
+        }
+        setIsPlanningTransit(false);
+        return;
+      }
 
       if (mode === "tricycle") {
         const plan = planTricycleTrip(start, end);
@@ -193,7 +271,21 @@ export default function MapComponent() {
         return;
       }
 
+      if (mode === "mixed") {
+        // Runs in a Web Worker (a long trip takes over a second). Clear the
+        // previous mode's drawing meanwhile so it isn't mistaken for the result.
+        drawGeneration.current++;
+        hideActiveRoute(currentMap);
+        setIsPlanningMixed(true);
+        const plan = await requestMixedTrip(start, end);
+        if (requestId !== routeRequest.current) return; // the trip or mode changed while it ran
+        setMixedPlan(plan);
+        setIsPlanningMixed(false);
+        return;
+      }
+
       const routes = await fetchRoadRoutes(mode, start, end);
+      if (requestId !== routeRequest.current) return;
       if (routes.length > 0) {
         setRoadRoutes(routes);
         setActiveRoadIdx(0);
@@ -223,34 +315,52 @@ export default function MapComponent() {
     setDrawnSteps(ready.steps);
   };
 
-  // Draw the selected option of the current mode.
+  // Draw the selected option of the current mode. When the mode has nothing
+  // to show (no jeepney worth taking, no tricycle zone, still loading), clear
+  // the map — otherwise the previous mode's route stays up and reads as this one.
   useEffect(() => {
     const currentMap = map.current;
     if (!isRoutingMode || !currentMap) return;
 
+    const clearDrawnRoute = () => {
+      drawGeneration.current++; // discard any draw still in flight
+      hideActiveRoute(currentMap);
+      clearRoutePills();
+    };
+
     if (travelMode === "transit") {
-      const plan = transitCandidates[activeTransitIdx];
-      if (plan && origin && selectedPlace) {
-        void showDrawing(buildTransitDrawing(plan, origin.coords, [Number(selectedPlace.lon), Number(selectedPlace.lat)]));
-      }
+      const route = transitPlan.routes[activeTransitIdx];
+      if (route) void showDrawing(buildMixedDrawing(route));
+      else clearDrawnRoute();
       return;
     }
 
     if (travelMode === "tricycle") {
       const route = tricyclePlan.routes[activeTricycleIdx];
       if (route) void showDrawing(buildTricycleDrawing(route));
+      else clearDrawnRoute();
+      return;
+    }
+
+    if (travelMode === "mixed") {
+      const route = mixedPlan.routes[activeMixedIdx];
+      if (route) void showDrawing(buildMixedDrawing(route));
+      else clearDrawnRoute();
       return;
     }
 
     // Driving / walking / motor. Show or hide walking dots at once, so dots
     // from a previous mode don't linger while the new routes load.
-    drawGeneration.current++; // discard any jeepney draw still in flight
     setWalkDotsVisible(currentMap, travelMode === "walking");
     const route = roadRoutes[activeRoadIdx];
-    if (route) showRoadRoute(currentMap, route, travelMode);
+    if (route) {
+      drawGeneration.current++; // discard any jeepney draw still in flight
+      clearRoutePills();
+      showRoadRoute(currentMap, route, travelMode);
+    } else clearDrawnRoute();
     // showDrawing is re-created every render; it only reads refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoadIdx, roadRoutes, activeTransitIdx, transitCandidates, tricyclePlan, activeTricycleIdx, travelMode, isRoutingMode]);
+  }, [activeRoadIdx, roadRoutes, activeTransitIdx, transitPlan, tricyclePlan, activeTricycleIdx, mixedPlan, activeMixedIdx, travelMode, isRoutingMode]);
 
   const closeRouting = () => {
     setIsRoutingMode(false);
@@ -258,28 +368,43 @@ export default function MapComponent() {
     setDrawnSteps([]);
     setRoadRoutes([]);
     setActiveRoadIdx(0);
-    setTransitCandidates([]);
+    setTransitPlan(NO_MIXED_PLAN);
+    setIsPlanningTransit(false);
+    setTransitNotRunning([]);
+    setTransitTricycle(null);
     setActiveTransitIdx(0);
     setTricyclePlan(NO_TRICYCLE_PLAN);
     setActiveTricycleIdx(0);
+    setMixedPlan(NO_MIXED_PLAN);
+    setActiveMixedIdx(0);
+    setIsPlanningMixed(false);
+    routeRequest.current++; // drop any mixed search still running
     setIsolatedDirectionId(null);
     removeMarkers(routeEndpointPins.current);
     routeEndpointPins.current = [];
     drawGeneration.current++;
 
+    setPeekPlace(null);
+    closeAllPopups();
     clearRouteFromMap();
-    if (map.current) showJeepneyRoutes(map.current, visibleRouteIds, null);
   };
 
   const closePlacePopup = () => {
+    closeAllPopups();
+    if (isRoutingMode) {
+      setPeekPlace(null); // only the peeked card closes — the trip stays as it is
+      return;
+    }
     setSelectedPlace(null);
     clearRouteFromMap();
-    if (map.current) showJeepneyRoutes(map.current, visibleRouteIds, isolatedDirectionId);
   };
 
+  /** From the lists: fly to the place and open its card. */
   const focusPlace = (place: Place) => {
+    if (map.current) openPlacePopup(map.current, place);
     setSelectedPlace(place);
-    map.current?.flyTo({ center: [place.lon, place.lat], zoom: PLACE_FOCUS_ZOOM, padding: mapViewPadding(0, "peek") });
+    // Place the marker below centre: its card opens above it and can be tall.
+    map.current?.flyTo({ center: [place.lon, place.lat], zoom: PLACE_FOCUS_ZOOM, padding: mapViewPadding(0, "peek"), offset: [0, usesBottomSheet() ? 150 : 190] });
   };
 
   // =====================================================
@@ -306,7 +431,7 @@ export default function MapComponent() {
 
     const route = mockRoutes.find((r) => r.id === routeId);
     const direction: RouteDirectionKey = directionId.endsWith("-fwd") ? "fwd" : "rev";
-    const path = route && directionPath(route, direction);
+    const path = route && routePath(route, direction);
     if (!route || !path || !map.current) return;
 
     routeEndpointPins.current = addRouteEndpointPins(map.current, path, JEEPNEY_LINE_COLORS[route.colorCode]);
@@ -333,11 +458,9 @@ export default function MapComponent() {
     setVisibleZoneIds((prev) => (prev.includes(zoneId) ? prev.filter((id) => id !== zoneId) : [...prev, zoneId]));
 
   useEffect(() => {
-    if (map.current?.isStyleLoaded()) showJeepneyRoutes(map.current, visibleRouteIds, isolatedDirectionId);
-  }, [visibleRouteIds, isolatedDirectionId]);
-
-  useEffect(() => {
-    if (map.current?.isStyleLoaded()) showZones(map.current, tricycleZones, visibleZoneIds);
+    // Layers that aren't drawn yet are skipped inside showZones, so no "style loaded" gate — that flag
+    // can read false while tiles are still loading, which silently dropped the change.
+    if (map.current) showZones(map.current, tricycleZones, visibleZoneIds);
   }, [visibleZoneIds]);
 
   // =====================================================
@@ -358,13 +481,31 @@ export default function MapComponent() {
     map.current = currentMap;
     userMarker.current = addUserMarker(currentMap, DEFAULT_CITY_CENTER);
 
-    const addMarkers = (list: Place[]) => {
-      for (const place of list) placeMarkers.current.push(addPlaceMarker(currentMap, place, setSelectedPlace));
+    /**
+     * A tapped marker. Registered once, so it reads modes through refs:
+     *   choosing the start → the start is set at that place;
+     *   directions mode    → its card opens (peek), the trip doesn't change;
+     *   browsing           → it becomes the selected place, card open.
+     */
+    const onMarkerTap = (place: Place) => {
+      if (isPickingOriginRef.current) {
+        setOrigin({ name: place.name, coords: [place.lon, place.lat] });
+        setIsPickingOrigin(false);
+        userMarker.current?.setLngLat([place.lon, place.lat]);
+        return;
+      }
+      openPlacePopup(currentMap, place);
+      if (isRoutingModeRef.current) setPeekPlace(place);
+      else setSelectedPlace(place);
     };
-    const refreshMarkerVisibility = () => updatePlaceMarkerVisibility(placeMarkers.current, currentMap.getZoom());
+    const addMarkers = (list: Place[]) => {
+      for (const place of list) placeMarkers.current.push(addPlaceMarker(currentMap, place, onMarkerTap));
+    };
+    const refreshMarkerVisibility = () => updatePlaceMarkerVisibility(placeMarkers.current, currentMap.getZoom(), hidePlaceMarkersRef.current);
 
     currentMap.on("load", async () => {
       drawAllJeepneyRoutes(currentMap);
+      if (isRoutingModeRef.current) hideJeepneyRoutes(currentMap); // a trip started before the map finished loading
       tricycleZones.forEach((zone) => drawZone(currentMap, zone, true, () => !isPickingOriginRef.current));
 
       // Stands (and stops) are local data: show them at once, not after the slow amenities fetch.
@@ -376,6 +517,7 @@ export default function MapComponent() {
       try {
         const res = await fetch("/api/amenities");
         const amenities = parseAmenities(await res.json());
+        describeStandLocations(amenities); // "… · by Jollibee (40 m)" on each stand, now that landmarks are known
         setPlaces([...amenities, ...localPlaces]);
         addMarkers(amenities);
         refreshMarkerVisibility();
@@ -407,11 +549,13 @@ export default function MapComponent() {
   // Layout
   // =====================================================
 
-  const filteredPlaces = places.filter((place) => matchesSearch(place, searchQuery));
+  const filteredPlaces = searchPlaces(places, searchQuery);
   const isRoadMode = travelMode === "driving" || travelMode === "walking" || travelMode === "cycling";
   const activeRoadRoute = roadRoutes[activeRoadIdx];
   const routeSteps = isRoadMode ? (activeRoadRoute ? roadRouteSteps(activeRoadRoute, travelMode) : []) : drawnSteps;
-  const popupRoot = selectedPlace ? document.getElementById(POPUP_PORTAL_ID) : null;
+  /** The place whose card is open: a peeked place in directions mode, otherwise the selected one. */
+  const cardPlace = isRoutingMode ? peekPlace : selectedPlace;
+  const popupRoot = cardPlace ? document.getElementById(POPUP_PORTAL_ID) : null;
 
   const panelProps: PanelProps = {
     isRoutingMode,
@@ -436,14 +580,25 @@ export default function MapComponent() {
     roadRoutes,
     activeRoadIdx,
     setActiveRoadIdx,
-    transitCandidates,
+    transitRoutes: transitPlan.routes,
     activeTransitIdx,
     setActiveTransitIdx,
+    isPlanningTransit,
+    transitWalkMinutes: transitPlan.walkMinutes,
+    transitSavesLittle: savesLittle(transitPlan),
+    transitNotRunning,
+    transitTricycle,
     tricycleRoutes: tricyclePlan.routes,
     activeTricycleIdx,
     setActiveTricycleIdx,
     tricycleWalkOnly: tricyclePlan.walkBeatsTricycle,
     tricycleWalkMinutes: tricyclePlan.walkMinutes,
+    mixedRoutes: mixedPlan.routes,
+    activeMixedIdx,
+    setActiveMixedIdx,
+    isPlanningMixed,
+    mixedWalkOnly: mixedPlan.walkBeatsRiding,
+    mixedWalkMinutes: mixedPlan.walkMinutes,
   };
 
   return (
@@ -482,16 +637,22 @@ export default function MapComponent() {
             onSetAllRoutesVisible={setAllRoutesVisible}
             visibleZoneIds={visibleZoneIds}
             onToggleZone={toggleZone}
-            onShowAllZones={() => setVisibleZoneIds(ALL_ZONE_IDS)}
+            onSetAllZonesVisible={(visible) => setVisibleZoneIds(visible ? ALL_ZONE_IDS : [])}
           />
         </div>
 
         <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
 
-        {selectedPlace &&
+        {cardPlace &&
           popupRoot &&
           createPortal(
-            <AmenityPopupBox place={selectedPlace} onClose={closePlacePopup} onGetDirections={() => startNavigationFlow(selectedPlace)} />,
+            <PlaceDetailsCard
+              key={cardPlace.id}
+              place={cardPlace}
+              from={origin?.coords}
+              onClose={closePlacePopup}
+              onGetDirections={() => startNavigationFlow(cardPlace)}
+            />,
             popupRoot
           )}
       </div>

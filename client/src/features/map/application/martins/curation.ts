@@ -84,6 +84,14 @@ export function curateParetoRoutes(routes: RouteResult[], maxCount = 4): RouteRe
   return [...indices].sort((a, b) => a - b).map((i) => pool[i]);
 }
 
+/**
+ * Every extra ride in an itinerary must save at least this many minutes over
+ * the best option with fewer rides; otherwise it is an unnecessary transfer
+ * (same trip, more fares) and is not shown. Used by Tricycle, Mixed and
+ * Transit (jeepney/transitCandidates.ts) alike.
+ */
+export const EXTRA_RIDE_MIN_SAVING_MIN = 5;
+
 const isTransfer = (r: RouteResult) => r.legs.filter((l) => l.transition === "board-trike").length >= 2;
 
 /**
@@ -97,13 +105,108 @@ const isTransfer = (r: RouteResult) => r.legs.filter((l) => l.transition === "bo
  */
 export function selectDirectAndTransfer(routes: RouteResult[]): RouteResult[] {
   if (routes.length <= 1) return routes;
-  const direct = routes.filter((r) => !isTransfer(r));
   const transfers = routes.filter(isTransfer);
+  // A single tricycle can't cover a long trip (rides are capped — MAX_RIDE_KM), so its "Direct"
+  // option can mean walking most of the way first (41 min on foot, then one ride). When a
+  // transfer exists, such a Direct isn't offered: the hop is necessary, not optional.
+  const direct = routes.filter((r) => !isTransfer(r) && (transfers.length === 0 || walkingKm(r) <= MIXED_MAX_WALK_KM));
 
-  const directPick = direct[0] ?? routes[0];
-  if (transfers.length > 0) return [directPick, transfers[0]];
+  const fastestFirst = (picks: RouteResult[]) => picks.sort((a, b) => a.cost[0] - b.cost[0] || a.cost[1] - b.cost[1]);
+  const directPick = direct[0];
+  // A transfer is only offered when there's no direct ride, or it's clearly faster.
+  const transferPick = transfers.find((t) => direct.length === 0 || t.cost[0] <= direct[0].cost[0] - EXTRA_RIDE_MIN_SAVING_MIN);
+  if (transferPick) return fastestFirst(directPick ? [directPick, transferPick] : [transferPick]);
 
   if (direct.length <= 1) return direct.length > 0 ? direct : routes.slice(0, 1);
   const middleIndex = Math.min(direct.length - 1, Math.max(1, Math.round((direct.length - 1) / 2)));
   return [directPick, direct[middleIndex]];
+}
+
+// ---- Mixed mode (tricycle + jeepney + walking, planMixedTrip.ts) ----
+
+/** True if the itinerary boards anything at all (a tricycle or a jeepney). */
+export const ridesSomething = (route: RouteResult) =>
+  route.legs.some((leg) => leg.transition === "board-trike" || leg.transition === "board-jeep");
+
+/** Vehicles boarded (tricycles and jeepneys). */
+const boardings = (route: RouteResult) => route.legs.filter((l) => l.transition === "board-trike" || l.transition === "board-jeep").length;
+
+/**
+ * Keeps an option with more rides only if it is at least EXTRA_RIDE_MIN_SAVING_MIN
+ * faster than every option with fewer rides — no "J-02 → J-01" for the same time
+ * (and twice the fare) as a direct J-06.
+ */
+export function dropUnnecessaryTransfers(routes: RouteResult[], alsoWorthIt?: (route: RouteResult, fewerRides: RouteResult) => boolean): RouteResult[] {
+  return routes.filter((r) =>
+    routes.every((other) => boardings(other) >= boardings(r) || r.cost[0] <= other.cost[0] - EXTRA_RIDE_MIN_SAVING_MIN || !!alsoWorthIt?.(r, other))
+  );
+}
+
+/** All walking in the itinerary, in km. */
+export function walkingKm(route: RouteResult): number {
+  let km = 0;
+  for (const leg of route.legs) {
+    if (leg.mode !== "walk") continue;
+    for (let j = 1; j < leg.coordinates.length; j++) km += haversineKm(leg.coordinates[j - 1], leg.coordinates[j]);
+  }
+  return km;
+}
+
+/**
+ * More walking than this in total, and the itinerary is only shown when
+ * nothing else exists. Walking is free, so the Pareto set's cheapest end is
+ * often "walk 2 km to save ₱13" — correct, but rarely what a rider wants first.
+ */
+export const MIXED_MAX_WALK_KM = 1.5;
+
+/**
+ * Up to three mixed options, fastest first: the fastest, the cheapest and one
+ * in between — plus, when an end of the trip is remote, the best tricycle +
+ * jeepney combination (remoteCombo). Fares are flat per boarding, so each Pareto route sits at its
+ * own fare level (₱13 jeep, ₱26 two jeeps, ₱30 trike, ₱43 trike + jeep, …)
+ * and the set stays small; this only trims long-walk extremes.
+ */
+export function curateMixedRoutes(routes: RouteResult[], maxCount = 3, builtCombo: RouteResult | null = null): RouteResult[] {
+  const comfortable = routes.filter((r) => walkingKm(r) <= MIXED_MAX_WALK_KM);
+  const walkable = comfortable.length > 0 ? comfortable : routes;
+  const pool = dropUnnecessaryTransfers(walkable);
+  let shown = pool;
+  if (pool.length > maxCount) {
+    const picks = new Set<number>([0, Math.round((pool.length - 1) / 2), pool.length - 1]);
+    shown = [...picks].sort((a, b) => a - b).map((i) => pool[i]);
+  }
+
+  // Tricycle + jeepney for a remote end of the trip (see remoteCombo), as one extra option.
+  const combo = remoteCombo(comfortable, shown) ?? (shown.some(isTrikeJeepCombo) ? null : builtCombo);
+  return combo ? [...shown, combo].sort((a, b) => a.cost[0] - b.cost[0] || a.cost[1] - b.cost[1]) : shown;
+}
+
+const usesJeep = (r: RouteResult) => r.legs.some((l) => l.transition === "board-jeep");
+const usesTrike = (r: RouteResult) => r.legs.some((l) => l.transition === "board-trike");
+/** Rides both a jeepney and a tricycle, in either order. */
+export const isTrikeJeepCombo = (r: RouteResult) => usesJeep(r) && usesTrike(r);
+
+/** How much walking a tricycle leg must save, compared with going by jeepney alone, to earn a combo its place. */
+export const COMBO_MIN_WALK_SAVED_KM = 0.3;
+
+/**
+ * The jeepney-and-tricycle option for a trip with a remote end: ride the
+ * jeepney for the main stretch and a tricycle for the part it doesn't reach
+ * (a destination up a side road, or the reverse — a tricycle out to the
+ * jeepney). The other display rules count it as "an unnecessary extra ride"
+ * whenever a single tricycle is a few minutes faster, so it gets its own slot
+ * when it's justified: there's no jeepney-only option at all, or the
+ * tricycle saves at least COMBO_MIN_WALK_SAVED_KM of walking compared with
+ * the jeepney-only one. Taken from the Pareto set first; when the Pareto
+ * set has none (a single tricycle beats every combo on time and price), the
+ * caller's built one (comboBuilder.ts) is offered instead. Fastest such
+ * combo; null if one is already shown or none qualifies.
+ */
+function remoteCombo(routes: RouteResult[], shown: RouteResult[]): RouteResult | null {
+  if (shown.some(isTrikeJeepCombo)) return null;
+  const jeepOnlyWalk = Math.min(...routes.filter((r) => usesJeep(r) && !usesTrike(r)).map(walkingKm));
+  const justified = routes.filter(
+    (r) => isTrikeJeepCombo(r) && (jeepOnlyWalk === Infinity || jeepOnlyWalk - walkingKm(r) >= COMBO_MIN_WALK_SAVED_KM)
+  );
+  return justified.sort((a, b) => a.cost[0] - b.cost[0])[0] ?? null;
 }

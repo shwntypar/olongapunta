@@ -48,7 +48,8 @@ function tricycleSteps(route: RouteResult): DirectionsStep[] {
       i++;
     }
     if (mode === "walk") {
-      steps.push({ maneuver: { instruction: `Walk (${Math.round(minutes)} min).` }, distance: 0 });
+      // Boarding (or getting off) right where you are leaves a zero-length walk — not worth a step.
+      if (minutes >= 0.5) steps.push({ maneuver: { instruction: `Walk (${Math.round(minutes)} min).` }, distance: 0 });
     } else if (mode === "trike") {
       const crossingNote = crossed ? " incl. zone-crossing fee" : "";
       steps.push({ maneuver: { instruction: `BOARD: Ride a tricycle (${Math.round(minutes)} min) — ₱${pesos.toFixed(2)}${crossingNote}.` }, distance: 0 });

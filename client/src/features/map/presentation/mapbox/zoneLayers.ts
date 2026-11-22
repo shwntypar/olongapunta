@@ -12,6 +12,16 @@ const ids = (zoneId: string) => ({
 });
 
 /**
+ * The base map's first label layer (street names, place names, POI icons).
+ * Zone fills and outlines go beneath it, so the map's own labels and
+ * amenity icons stay readable on top of the zones instead of being tinted
+ * over. (The app's own place markers are HTML and sit above everything.)
+ */
+function firstBaseLabelLayer(map: mapboxgl.Map): string | undefined {
+  return map.getStyle()?.layers?.find((layer) => layer.type === "symbol")?.id;
+}
+
+/**
  * Draws one zone. Clicking inside it shows the zone's name and fare, unless
  * canShowPopup() says no (e.g. the click is setting the trip's start point).
  */
@@ -27,14 +37,22 @@ export function drawZone(map: mapboxgl.Map, zone: TricycleZone, visible: boolean
 
   const visibility = visible ? "visible" : "none";
   map.addSource(id.source, { type: "geojson", data });
-  map.addLayer({ id: id.fill, type: "fill", source: id.source, layout: { visibility }, paint: { "fill-color": zone.color, "fill-opacity": 0.15 } });
-  map.addLayer({
-    id: id.outline,
-    type: "line",
-    source: id.source,
-    layout: { visibility, "line-join": "round" },
-    paint: { "line-color": zone.color, "line-width": 2.5, "line-dasharray": [2, 1.5] },
-  });
+  const beneathLabels = firstBaseLabelLayer(map);
+  map.addLayer(
+    { id: id.fill, type: "fill", source: id.source, layout: { visibility }, paint: { "fill-color": zone.color, "fill-opacity": 0.15 } },
+    beneathLabels
+  );
+  map.addLayer(
+    {
+      id: id.outline,
+      type: "line",
+      source: id.source,
+      layout: { visibility, "line-join": "round" },
+      paint: { "line-color": zone.color, "line-width": 2.5, "line-dasharray": [2, 1.5] },
+    },
+    beneathLabels
+  );
+  // The zone code itself stays on top, so it is never hidden by the map's labels.
   map.addLayer({
     id: id.label,
     type: "symbol",

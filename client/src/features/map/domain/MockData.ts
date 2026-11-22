@@ -76,9 +76,10 @@ export const mockRoutes: JeepneyRoute[] = [
   {
     id: 'route-2',
     colorCode: 'BLUE',
-    routeName: 'Mangan-Vaca, Subic to Olongapo',
+    // Named in the direction its path is drawn (it starts downtown and ends in Mangan-Vaca).
+    routeName: 'Olongapo to Mangan-Vaca, Subic',
     routeCode: 'J-08',
-    reversedName: 'Olongapo to Mangan-Vaca Subic',
+    reversedName: 'Mangan-Vaca, Subic to Olongapo',
     baseFare: 13.00, // fare schedule: ₱13 regular jeepney fare
     farePerKm: 1.75,
     stops: [

@@ -1,7 +1,7 @@
 import type { Origin, Place } from "../../../domain/types";
 import { CloseIcon } from "../../components/icons";
 
-/** "Directions — From: … / To: …" with the close button. */
+/** "Directions — From: … / To: …" with the Cancel button that ends the trip. */
 export default function TripHeader({
   origin,
   destination,
@@ -35,14 +35,18 @@ export default function TripHeader({
             <span className="text-gray-400 w-10 flex-shrink-0">To:</span>
             <span className="font-semibold text-gray-800 truncate">{destination?.name || "Unnamed"}</span>
           </div>
+          {destination?.where && <div className="pl-12 -mt-0.5 text-[11px] text-gray-500 truncate">{destination.where}</div>}
         </div>
       </div>
+      {/* Labelled and tinted so it reads as "end this trip" at a glance — the bare grey ✕ was easy to miss. */}
       <button
         onClick={onClose}
-        aria-label="Close directions"
-        className="p-1.5 hover:bg-gray-100 border border-gray-200 hover:border-gray-300 text-gray-400 hover:text-gray-900 rounded-lg transition-all"
+        aria-label="Cancel directions"
+        title="Cancel directions"
+        className="flex-shrink-0 inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-100 active:bg-red-200"
       >
-        <CloseIcon className="w-5 h-5" strokeWidth={2} />
+        <CloseIcon className="w-4 h-4" strokeWidth={2.5} />
+        Cancel
       </button>
     </div>
   );

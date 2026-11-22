@@ -1,6 +1,9 @@
 // "Jeepney Routes" tab: every route, each direction a button that isolates it on the map.
 
+import { useState } from "react";
+import { isRunning } from "../../../application/jeepney/serviceRules";
 import { JEEPNEY_SWATCH_COLORS } from "../../../domain/jeepneyColors";
+import { serviceHoursLabel, unitsLabel } from "../../../domain/jeepneyService";
 import { mockRoutes } from "../../../domain/MockData";
 
 function DirectionButton({ label, arrow, isolated, onClick }: { label: string; arrow: string; isolated: boolean; onClick: () => void }) {
@@ -28,6 +31,7 @@ export default function JeepneyRouteIndex({
   isolatedDirectionId: string | null;
   onSelectRoute: (routeId: string, directionId: string) => void;
 }) {
+  const [now] = useState(() => new Date()); // read once when the tab opens
   return (
     <div className="space-y-3">
       <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 px-1">Interactive Route Index</h3>
@@ -45,6 +49,13 @@ export default function JeepneyRouteIndex({
               <span className="text-xs font-bold text-gray-400 uppercase tracking-wide">{route.colorCode}</span>
             </div>
           </div>
+          {(serviceHoursLabel(route.colorCode) || unitsLabel(route.colorCode)) && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+              {serviceHoursLabel(route.colorCode) && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">🕒 {serviceHoursLabel(route.colorCode)}</span>}
+              {unitsLabel(route.colorCode) && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">{unitsLabel(route.colorCode)}</span>}
+              {!isRunning(route, now) && <span className="rounded-full bg-red-50 px-2 py-0.5 text-red-600">Not running now</span>}
+            </div>
+          )}
 
           <div className="mt-3 space-y-2">
             <DirectionButton

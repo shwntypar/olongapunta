@@ -13,9 +13,16 @@
 //   routeResult.ts       labels → itineraries (findParetoRoutes)
 //   curation.ts          which of those itineraries to show (display only)
 //   planTricycleTrip.ts  what the app calls: coordinates in, options out
+//   jeepneyLayer.ts      adds jeepney stops, rides and transfer walks to a copy of the graph
+//   planMixedTrip.ts     tricycle + jeepney + walking in one search ("Mixed" mode)
 //   routeMetrics.ts, routeShape.ts   facts and map shapes of one itinerary
 
+import type { JeepneyColor } from "../../domain/MockData";
+
 export type TravelLegMode = "walk" | "jeep" | "trike";
+
+/** How a label was reached. The jeep transitions only occur in the mixed graph (jeepneyLayer.ts). */
+export type Transition = "start" | "walk" | "board-trike" | "trike-home" | "trike-cross" | "board-jeep" | "jeep-ride" | "alight";
 
 // ---- Precomputed graph (output of scripts/build-martins-graph.ts) ----
 
@@ -51,6 +58,41 @@ export interface MartinsEdge {
   walkable: boolean;
   /** Full-resolution geometry for rendering this leg later, [lon, lat][]. */
   coordinates: [number, number][];
+  /**
+   * A footpath link added by jeepneyLayer.ts (jeepney stop ↔ road, or stop ↔
+   * stop for a transfer). Walkers use it; tricycles never ride it.
+   */
+  walkOnly?: boolean;
+}
+
+/** The jeepney route direction a stop or ride edge belongs to (jeepneyLayer.ts). */
+export interface JeepLine {
+  /** JeepneyRoute.id */
+  routeId: string;
+  /** Which way along the route: its digitized path ("fwd") or the return path ("rev"). */
+  direction: "fwd" | "rev";
+  routeCode: string;
+  colorCode: JeepneyColor;
+  /** e.g. "SM Olongapo Downtown" — where this direction is heading. */
+  heading: string;
+  /** Where this direction starts ("Castillejos" for "Castillejos to Olongapo"), to tell apart two lines with the same code and heading. */
+  from: string;
+  /** Fare paid once per boarding. */
+  fare: number;
+  /** Expected wait to board (jeepney/serviceRules.ts — longer for colours with few units). */
+  waitMinutes: number;
+  /**
+   * Provincial routes leaving the city: they fill up at their terminal and
+   * seldom stop on the way, so they can only be boarded near the start —
+   * this names that terminal ("Palengke"). Unset for every other direction.
+   */
+  boardAtStart?: string;
+}
+
+/** One ride edge between two consecutive stops of the same direction. */
+export interface JeepRideEdge extends MartinsEdge {
+  line: JeepLine;
+  minutes: number;
 }
 
 export interface MartinsGraph {
@@ -94,6 +136,16 @@ export interface ZoneRuleConfig {
    */
   boardOnlyAtTerminals?: boolean;
   /**
+   * With boardOnlyAtTerminals: a rider away from every stand may still flag
+   * down a passing tricycle, at the longer FLAG_DOWN_WAIT_MINUTES wait instead
+   * of a stand's short one — on through roads only ("through-roads", the
+   * `boardable` nodes) or on any street in the zone ("anywhere"). The search
+   * then trades walking to a stand against waiting where you are, instead of
+   * walking half a kilometre to the nearest stand. Unset = boarding only at
+   * the stands (the original rule).
+   */
+  flagDownOffStand?: "through-roads" | "anywhere";
+  /**
    * Maximum distance (km) a single continuous ride may cover before the
    * trike refuses to go further — real TODA tricycles operate a local
    * radius, not the full span of a zone's mapped polygon. Defaults to
@@ -126,7 +178,8 @@ export interface RouteState {
   entered: string;
 }
 
-export const stateKey = (s: RouteState): string => `${s.node}|${s.mode}|${s.homeZone ?? ""}|${s.entered}`;
+/** On a jeepney, "just boarded here" and "rode in to here" are different states (only the second can get off — neighbors.ts). */
+export const stateKey = (s: RouteState): string => `${s.node}|${s.mode}|${s.homeZone ?? ""}|${s.entered}${s.mode === "jeep" && s.crossed ? "|rode" : ""}`;
 
 /** [minutes, pesos] — lower is better in both. */
 export type Cost = [number, number];
@@ -138,7 +191,7 @@ export interface Label {
   /** The edge taken to reach this label, or null for virtual board/alight transitions. */
   edge: MartinsEdge | null;
   /** The kind of transition taken to reach this label — useful for turn-by-turn / fare breakdown. */
-  transition: "start" | "walk" | "board-trike" | "trike-home" | "trike-cross" | "alight";
+  transition: Transition;
   /**
    * Distance (km) covered since the current ride was boarded — resets to 0
    * on board-trike/alight. Deliberately NOT part of RouteState/stateKey: it
@@ -157,6 +210,18 @@ export interface RouteLeg {
   fromNode: string;
   toNode: string;
   coordinates: [number, number][];
+  /** Jeepney ride legs: the route direction ridden. */
+  line?: JeepLine;
+  /** Mixed plans only (planMixedTrip.ts): the TODA zone a tricycle was boarded in, on board-trike legs. */
+  zone?: string;
+  /**
+   * Mixed plans only, board-jeep legs, when waiting areas are known
+   * (domain/jeepneyWaitingAreas.ts): the waiting area boarded at, or null
+   * when boarding away from one (longer wait).
+   */
+  waitingArea?: string | null;
+  /** Mixed plans only, board-jeep legs: a local boarding note for this stop (domain/jeepneyAreaRules.ts). */
+  boardNote?: string;
 }
 
 export interface RouteResult {

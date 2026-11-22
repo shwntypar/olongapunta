@@ -53,7 +53,8 @@ export interface MartinsOptions {
    */
   stats?: MartinsStats;
   /**
-   * Only accept itineraries that board at least one tricycle. Off by default
+   * Only accept itineraries that board at least one vehicle (tricycle, or a
+   * jeepney in the mixed graph). Off by default
    * (the evaluated algorithm). Used as a UI fallback when walking alone
    * dominates every tricycle option on a short trip, so Tricycle mode can
    * still show the fastest ride instead of nothing. Adds a "has ridden"
@@ -143,7 +144,7 @@ export function martins(graph: LoadedGraph, startNode: string, goalNode: string,
       // Target pruning — this label can't beat an already-found result.
       if (results.some((r) => dominates(r.cost, cost) || equalCost(r.cost, cost))) continue;
 
-      const nRode = (rode.get(L) ?? false) || n.transition === "board-trike";
+      const nRode = (rode.get(L) ?? false) || n.transition === "board-trike" || n.transition === "board-jeep";
       const nk = requireRide ? `${stateKey(n.state)}|${nRode ? 1 : 0}` : stateKey(n.state);
       const existing = [...(permanent.get(nk) ?? []), ...(temporary.get(nk) ?? [])];
       if (existing.some((e) => dominates(e.cost, cost) || equalCost(e.cost, cost))) continue;

@@ -3,9 +3,9 @@
 
 import mapboxgl from "mapbox-gl";
 import type { Place } from "../../domain/types";
-import { categoryColor, categoryIconPath } from "../placeCategories";
+import { categoryIconPath, placeColor } from "../placeCategories";
 
-/** Popups render this empty div; map.tsx portals the React popup (AmenityPopupBox) into it. */
+/** Popups render this empty div; map.tsx portals the React place card (PlaceDetailsCard) into it. */
 export const POPUP_PORTAL_ID = "popup-portal-root";
 
 /** 1 = shown from the city-wide zoom, 2 = from street zoom, 3/4 = only when zoomed right in. */
@@ -17,10 +17,10 @@ const PRIORITY: Record<string, number> = {
 };
 const priorityOf = (type: string) => PRIORITY[type.toLowerCase()] || 3;
 
-function createMarkerElement(type: string): HTMLDivElement {
+function createMarkerElement(type: string, color: string): HTMLDivElement {
   const el = document.createElement("div");
   el.className = "custom-marker";
-  el.style.cssText = `width:24px;height:24px;border-radius:50%;border:2px solid white;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.3);background-color:${categoryColor(type)};`;
+  el.style.cssText = `width:24px;height:24px;border-radius:50%;border:2px solid white;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.3);background-color:${color};`;
   el.innerHTML = `
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="${categoryIconPath(type)}"></path>
@@ -30,25 +30,35 @@ function createMarkerElement(type: string): HTMLDivElement {
   return el;
 }
 
-/** Adds a clickable place marker. Clicking it opens an (empty) popup and calls onSelect, which fills it. */
+/** Adds a clickable place marker. Clicking it calls onSelect (which usually opens its popup with openPlacePopup). */
 export function addPlaceMarker(map: mapboxgl.Map, place: Place, onSelect: (place: Place) => void): mapboxgl.Marker {
-  const el = createMarkerElement(place.type);
+  const el = createMarkerElement(place.type, placeColor(place));
   const marker = new mapboxgl.Marker({ element: el }).setLngLat([place.lon, place.lat]).addTo(map);
 
+  // The page decides what a click means (open the card, set the trip's start, …) — see map.tsx.
   el.addEventListener("click", (e) => {
     e.stopPropagation();
-    closeAllPopups();
-    new mapboxgl.Popup({ offset: 25, closeButton: false })
-      .setLngLat([place.lon, place.lat])
-      .setHTML(`<div id="${POPUP_PORTAL_ID}"></div>`)
-      .addTo(map);
     onSelect(place);
   });
 
   return marker;
 }
 
-function closeAllPopups() {
+/**
+ * Opens the (empty) popup for a place, closing any other. The caller then
+ * selects the place, and map.tsx portals the place card into it.
+ */
+export function openPlacePopup(map: mapboxgl.Map, place: Place) {
+  closeAllPopups();
+  // maxWidth "none": the card sets its own width (Mapbox caps popups at 240px by default).
+  new mapboxgl.Popup({ offset: 25, closeButton: false, maxWidth: "none" })
+    .setLngLat([place.lon, place.lat])
+    .setHTML(`<div id="${POPUP_PORTAL_ID}"></div>`)
+    .addTo(map);
+}
+
+/** Removes every open place popup from the map. */
+export function closeAllPopups() {
   const open = document.getElementsByClassName("mapboxgl-popup");
   while (open[0]) open[0].remove();
 }
@@ -60,10 +70,15 @@ const SHOW_EVERYTHING_FROM_ZOOM = 17.5;
 /**
  * Hides lower-priority markers when zoomed out. Tricycle stands and jeepney
  * stops are the app's subject matter, not clutter, so they show at any zoom.
+ * With `hideAll` (a trip is being shown) every place marker is hidden.
  */
-export function updatePlaceMarkerVisibility(markers: mapboxgl.Marker[], zoom: number) {
+export function updatePlaceMarkerVisibility(markers: mapboxgl.Marker[], zoom: number, hideAll = false) {
   for (const marker of markers) {
     const el = marker.getElement();
+    if (hideAll) {
+      el.style.display = "none"; // a trip is on screen: only its own pins and labels stay (see map.tsx)
+      continue;
+    }
     const type = el.dataset.type;
     const priority = parseInt(el.dataset.priority || "3");
 
